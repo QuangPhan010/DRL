@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { FileCheck, CheckCircle2, XCircle, Eye, Clock } from "lucide-react";
+import { FileCheck, CheckCircle2, XCircle, Eye, Clock, Lock, FileDown, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -10,21 +10,46 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { mockEvaluations, mockStudents, mockCriteria, Evaluation, classificationColor } from "@/lib/mock-data";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 export default function Approvals() {
+  const { user } = useAuth();
   const [evals, setEvals] = useState(mockEvaluations);
   const [viewing, setViewing] = useState<Evaluation | null>(null);
   const [reviewNote, setReviewNote] = useState("");
+  const [locked, setLocked] = useState(false);
 
-  const pending = evals.filter(e => e.status === "pending");
+  const isAdvisor = user?.role === "advisor";
+  const isAffairs = user?.role === "student_affairs" || user?.role === "admin";
+
+  const pending = evals.filter(e => {
+    if (isAdvisor) return e.status === "advisor_pending";
+    if (isAffairs) return e.status === "pending";
+    return e.status === "pending" || e.status === "advisor_pending";
+  });
   const approved = evals.filter(e => e.status === "approved");
   const rejected = evals.filter(e => e.status === "rejected");
 
-  const decide = (id: string, status: "approved" | "rejected") => {
+  const decide = (id: string, status: "approved" | "rejected" | "pending") => {
     setEvals(evals.map(e => e.id === id ? { ...e, status, reviewNote } : e));
     setViewing(null); setReviewNote("");
-    toast.success(status === "approved" ? "Đã duyệt phiếu đánh giá" : "Đã từ chối phiếu đánh giá");
+    if (status === "pending") {
+      toast.success("Đã phê duyệt cấp lớp & gửi lên Phòng Công tác Sinh viên");
+    } else if (status === "approved") {
+      toast.success("Đã phê duyệt hoàn tất phiếu rèn luyện của sinh viên");
+    } else {
+      toast.success("Đã từ chối / yêu cầu bổ sung minh chứng");
+    }
+  };
+
+  const handleLockResults = () => {
+    setLocked(true);
+    toast.success("Đã khóa kết quả điểm rèn luyện Học kỳ 1 2024-2025!");
+  };
+
+  const handleExportReport = () => {
+    toast.success("Đã xuất báo cáo chính thức (PDF/Excel) thành công!");
   };
 
   const renderTable = (items: Evaluation[]) => (
@@ -80,17 +105,34 @@ export default function Approvals() {
 
   const stats = [
     { label: "Chờ duyệt", value: pending.length, icon: Clock, color: "from-warning to-orange-400" },
-    { label: "Đã duyệt", value: approved.length, icon: CheckCircle2, color: "from-success to-emerald-400" },
-    { label: "Đã từ chối", value: rejected.length, icon: XCircle, color: "from-destructive to-red-400" },
+    { label: "Đã duyệt hoàn tất", value: approved.length, icon: CheckCircle2, color: "from-success to-emerald-400" },
+    { label: "Đã từ chối / Bổ sung", value: rejected.length, icon: XCircle, color: "from-destructive to-red-400" },
   ];
 
   const viewingStudent = viewing && mockStudents.find(s => s.studentId === viewing.studentId);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-3xl font-bold flex items-center gap-3"><FileCheck className="h-7 w-7 text-primary" />Xét duyệt phiếu đánh giá</h1>
-        <p className="text-muted-foreground mt-1">Duyệt hoặc từ chối các phiếu đánh giá điểm rèn luyện của sinh viên.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-bold flex items-center gap-3"><FileCheck className="h-7 w-7 text-primary" />Xét duyệt phiếu đánh giá</h1>
+          <p className="text-muted-foreground mt-1">
+            {isAdvisor && "Cố vấn học tập: Kiểm tra, yêu cầu bổ sung hoặc duyệt gửi lên Trường."}
+            {isAffairs && "Phòng Công tác sinh viên: Phê duyệt cuối cùng, khóa kết quả và xuất báo cáo."}
+            {!isAdvisor && !isAffairs && "Duyệt hoặc từ chối các phiếu đánh giá điểm rèn luyện của sinh viên."}
+          </p>
+        </div>
+
+        {isAffairs && (
+          <div className="flex gap-2">
+            <Button variant="outline" className="gap-2 border-primary/20" onClick={handleExportReport}>
+              <FileDown className="h-4 w-4" />Xuất báo cáo chính thức
+            </Button>
+            <Button disabled={locked} onClick={handleLockResults} className="bg-destructive text-destructive-foreground hover:bg-destructive/90 gap-2">
+              <Lock className="h-4 w-4" />{locked ? "Đã khóa kết quả" : "Khóa kết quả cuối cùng"}
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -113,7 +155,7 @@ export default function Approvals() {
         <TabsList className="grid grid-cols-3 w-full md:w-fit">
           <TabsTrigger value="pending">Chờ duyệt ({pending.length})</TabsTrigger>
           <TabsTrigger value="approved">Đã duyệt ({approved.length})</TabsTrigger>
-          <TabsTrigger value="rejected">Từ chối ({rejected.length})</TabsTrigger>
+          <TabsTrigger value="rejected">Từ chối / Bổ sung ({rejected.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="pending" className="mt-4">{renderTable(pending)}</TabsContent>
         <TabsContent value="approved" className="mt-4">{renderTable(approved)}</TabsContent>
@@ -155,24 +197,33 @@ export default function Approvals() {
               </div>
 
               {viewing.note && (
-                <div className="p-3 rounded-lg bg-muted/40 text-sm"><span className="font-medium">Ghi chú: </span>{viewing.note}</div>
+                <div className="p-3 rounded-lg bg-muted/40 text-sm"><span className="font-medium">Ghi chú sinh viên: </span>{viewing.note}</div>
               )}
 
-              {viewing.status === "pending" && (
-                <div className="space-y-2"><Label>Nhận xét của cố vấn</Label>
-                  <Textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Nhập nhận xét..." rows={3} />
+              {viewing.status !== "approved" && viewing.status !== "rejected" && (
+                <div className="space-y-2"><Label>Nhận xét / Yêu cầu bổ sung</Label>
+                  <Textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Nhập lý do nếu từ chối hoặc cần bổ sung minh chứng..." rows={3} />
                 </div>
               )}
             </div>
           )}
-          {viewing?.status === "pending" && (
+          {viewing && viewing.status !== "approved" && viewing.status !== "rejected" && (
             <DialogFooter className="gap-2">
               <Button variant="outline" className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => decide(viewing.id, "rejected")}>
-                <XCircle className="h-4 w-4" />Từ chối
+                <XCircle className="h-4 w-4" />Yêu cầu bổ sung
               </Button>
-              <Button className="gap-2 bg-success hover:bg-success/90" onClick={() => decide(viewing.id, "approved")}>
-                <CheckCircle2 className="h-4 w-4" />Duyệt phiếu
-              </Button>
+
+              {isAdvisor && (
+                <Button className="gap-2 bg-primary hover:bg-primary/90" onClick={() => decide(viewing.id, "pending")}>
+                  <CheckCircle2 className="h-4 w-4" />Duyệt gửi lên trường
+                </Button>
+              )}
+
+              {isAffairs && (
+                <Button className="gap-2 bg-success hover:bg-success/90" onClick={() => decide(viewing.id, "approved")}>
+                  <CheckCircle2 className="h-4 w-4" />Phê duyệt cuối cùng
+                </Button>
+              )}
             </DialogFooter>
           )}
         </DialogContent>

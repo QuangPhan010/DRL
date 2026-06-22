@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ClipboardList, Save, Send, Search } from "lucide-react";
+import { ClipboardList, Save, Send, Search, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { mockStudents, mockCriteria, classify, classificationColor } from "@/lib/mock-data";
+import { mockStudents, mockCriteria, classify, classificationColor, Criterion } from "@/lib/mock-data";
 import { toast } from "sonner";
 
 export default function Evaluations() {
@@ -16,10 +16,20 @@ export default function Evaluations() {
   const [search, setSearch] = useState("");
   const [semester, setSemester] = useState("HK1");
   const [year, setYear] = useState("2024-2025");
-  const [scores, setScores] = useState<Record<string, number>>(
-    Object.fromEntries(mockCriteria.map(c => [c.id, 0]))
-  );
   const [note, setNote] = useState("");
+
+  // Manage scores at sub-item level (Cấp 3)
+  const [subScores, setSubScores] = useState<Record<string, number>>(() => {
+    const initial: Record<string, number> = {};
+    mockCriteria.forEach(c => {
+      c.groups?.forEach(g => {
+        g.subItems.forEach(s => {
+          initial[s.id] = 0;
+        });
+      });
+    });
+    return initial;
+  });
 
   const filteredStudents = useMemo(
     () => mockStudents.filter(s => !search || s.fullName.toLowerCase().includes(search.toLowerCase()) || s.studentId.includes(search)).slice(0, 8),
@@ -27,25 +37,48 @@ export default function Evaluations() {
   );
 
   const student = mockStudents.find(s => s.studentId === studentId);
-  const total = Object.values(scores).reduce((a, b) => a + b, 0);
+
+  // Dynamic calculations
+  const getParentScore = (c: Criterion) => {
+    let sum = 0;
+    c.groups?.forEach(g => {
+      g.subItems.forEach(s => {
+        sum += subScores[s.id] || 0;
+      });
+    });
+    return Math.max(0, Math.min(c.maxScore, sum));
+  };
+
+  const parentScores = useMemo(() => {
+    return Object.fromEntries(mockCriteria.map(c => [c.id, getParentScore(c)]));
+  }, [subScores]);
+
+  const total = useMemo(() => {
+    return Object.values(parentScores).reduce((a, b) => a + b, 0);
+  }, [parentScores]);
+
   const classification = classify(total);
 
-  const updateScore = (id: string, val: number, max: number) => {
+  const updateSubScore = (id: string, val: number, max: number) => {
     const v = Math.max(0, Math.min(max, isNaN(val) ? 0 : val));
-    setScores({ ...scores, [id]: v });
+    setSubScores(prev => ({ ...prev, [id]: v }));
+  };
+
+  const togglePenalty = (id: string, penalty: number, active: boolean) => {
+    setSubScores(prev => ({ ...prev, [id]: active ? penalty : 0 }));
   };
 
   const handleSubmit = (status: "draft" | "pending") => {
-    toast.success(status === "draft" ? "Đã lưu nháp" : "Đã gửi phiếu đánh giá để xét duyệt");
+    toast.success(status === "draft" ? "Đã lưu nháp kết quả tự đánh giá" : "Đã gửi phiếu tự đánh giá lên Ban cán sự lớp");
   };
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-3xl font-bold flex items-center gap-3">
-          <ClipboardList className="h-7 w-7 text-primary" />Đánh giá điểm rèn luyện
+          <ClipboardList className="h-7 w-7 text-primary" />Tự đánh giá điểm rèn luyện
         </h1>
-        <p className="text-muted-foreground mt-1">Chấm điểm rèn luyện theo từng tiêu chí và học kỳ.</p>
+        <p className="text-muted-foreground mt-1">Đánh giá chi tiết từng tiêu chí con để hệ thống tự động cộng dồn điểm tổng học kỳ.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -93,7 +126,7 @@ export default function Evaluations() {
 
             {/* Summary */}
             <div className="p-4 rounded-xl bg-gradient-hero text-white">
-              <p className="text-sm opacity-80">Tổng điểm</p>
+              <p className="text-sm opacity-80">Tổng điểm tích lũy</p>
               <p className="font-display text-5xl font-bold mt-1">{total}<span className="text-lg opacity-70">/100</span></p>
               <Badge className="mt-3 bg-white/20 text-white border-0 hover:bg-white/25">{classification}</Badge>
               <Progress value={total} className="mt-3 bg-white/20" />
@@ -120,7 +153,7 @@ export default function Evaluations() {
 
           {mockCriteria.map(c => (
             <Card key={c.id} className="border-0 shadow-md">
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <CardTitle className="font-display text-base flex items-center gap-2">
@@ -129,19 +162,51 @@ export default function Evaluations() {
                     <CardDescription className="mt-1">{c.description}</CardDescription>
                   </div>
                   <div className="text-right shrink-0">
-                    <Input type="number" min={0} max={c.maxScore} value={scores[c.id]}
-                      onChange={e => updateScore(c.id, parseInt(e.target.value), c.maxScore)}
-                      className="w-20 text-center font-bold text-lg" />
-                    <p className="text-xs text-muted-foreground mt-1">/ {c.maxScore} điểm</p>
+                    <span className="font-display font-bold text-2xl text-primary">{parentScores[c.id]}</span>
+                    <span className="text-xs text-muted-foreground"> / {c.maxScore}đ</span>
                   </div>
                 </div>
               </CardHeader>
-              {c.subCriteria && (
-                <CardContent className="pt-0 space-y-2">
-                  {c.subCriteria.map(sc => (
-                    <div key={sc.id} className="flex items-center justify-between text-sm py-1.5 px-3 rounded-lg bg-muted/30">
-                      <span>{sc.name}</span>
-                      <Badge variant="secondary">Tối đa {sc.maxScore}đ</Badge>
+              {c.groups && (
+                <CardContent className="pt-0 space-y-4">
+                  {c.groups.map(g => (
+                    <div key={g.id} className="space-y-2">
+                      <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{g.name}</p>
+                      <div className="space-y-2 pl-3 border-l-2 border-primary/20">
+                        {g.subItems.map(sc => {
+                          const isPenalty = sc.maxScore < 0;
+                          return (
+                            <div key={sc.id} className="flex items-center justify-between text-sm py-2 px-3 rounded-lg bg-muted/40 hover:bg-muted/65 transition-colors gap-4">
+                              <span className="leading-snug">{sc.name}</span>
+                              <div className="shrink-0 flex items-center gap-3">
+                                {isPenalty ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-destructive font-semibold">Vi phạm ({sc.maxScore}đ)</span>
+                                    <input
+                                      type="checkbox"
+                                      checked={subScores[sc.id] < 0}
+                                      onChange={e => togglePenalty(sc.id, sc.maxScore, e.target.checked)}
+                                      className="h-4.5 w-4.5 rounded border-gray-300 text-destructive focus:ring-destructive cursor-pointer"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      max={sc.maxScore}
+                                      value={subScores[sc.id]}
+                                      onChange={e => updateSubScore(sc.id, parseInt(e.target.value), sc.maxScore)}
+                                      className="w-16 h-8 text-center text-xs font-bold"
+                                    />
+                                    <span className="text-xs text-muted-foreground">/ {sc.maxScore}đ</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   ))}
                 </CardContent>
@@ -152,13 +217,13 @@ export default function Evaluations() {
           <Card className="border-0 shadow-md">
             <CardHeader><CardTitle className="font-display text-base">Ghi chú</CardTitle></CardHeader>
             <CardContent>
-              <Textarea placeholder="Nhập ghi chú, nhận xét về sinh viên..." value={note} onChange={e => setNote(e.target.value)} rows={4} />
+              <Textarea placeholder="Nhập ghi chú, nhận xét về quá trình rèn luyện..." value={note} onChange={e => setNote(e.target.value)} rows={4} />
             </CardContent>
           </Card>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-end sticky bottom-4 bg-card/80 backdrop-blur p-3 rounded-xl border shadow-elegant">
             <Button variant="outline" onClick={() => handleSubmit("draft")} className="gap-2"><Save className="h-4 w-4" />Lưu nháp</Button>
-            <Button onClick={() => handleSubmit("pending")} className="gap-2 bg-gradient-primary shadow-md"><Send className="h-4 w-4" />Gửi xét duyệt</Button>
+            <Button onClick={() => handleSubmit("pending")} className="gap-2 bg-gradient-primary shadow-md"><Send className="h-4 w-4" />Gửi tự đánh giá</Button>
           </div>
         </div>
       </div>

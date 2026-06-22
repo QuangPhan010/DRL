@@ -13,6 +13,10 @@ import Approvals from "./pages/Approvals";
 import MyScores from "./pages/MyScores";
 import Criteria from "./pages/Criteria";
 import SettingsPage from "./pages/Settings";
+import Activities from "./pages/Activities";
+import ClassReview from "./pages/ClassReview";
+import DataSync from "./pages/DataSync";
+import Classes from "./pages/Classes";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -29,12 +33,17 @@ const App = () => (
             <Route element={<AppLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/students" element={<Students />} />
+              <Route path="/classes" element={<Classes />} />
               <Route path="/evaluations" element={<Evaluations />} />
               <Route path="/approvals" element={<Approvals />} />
               <Route path="/my-scores" element={<MyScores />} />
               <Route path="/criteria" element={<Criteria />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/activities" element={<Activities />} />
+              <Route path="/class-review" element={<ClassReview />} />
+              <Route path="/data-sync" element={<DataSync />} />
             </Route>
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

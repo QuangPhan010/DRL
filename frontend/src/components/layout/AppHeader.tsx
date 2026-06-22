@@ -13,7 +13,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
-const roleLabels = { admin: "Quản trị viên", advisor: "Cố vấn học tập", student: "Sinh viên" };
+const roleLabels = {
+  admin: "Quản trị hệ thống",
+  advisor: "Cố vấn học tập",
+  student: "Sinh viên",
+  organizer: "Đơn vị tổ chức",
+  class_monitor: "Ban cán sự lớp",
+  student_affairs: "Phòng Công tác SV",
+  academic_affairs: "Phòng Đào tạo"
+};
 
 const notifications = [
   { id: 1, title: "Có 3 phiếu đánh giá mới chờ duyệt", time: "5 phút trước", unread: true },

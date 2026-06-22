@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ClipboardList, FileCheck, Settings, GraduationCap, User as UserIcon, Sparkles,
+  CalendarDays, ClipboardCheck, RefreshCw,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -12,12 +13,16 @@ import { Role } from "@/lib/mock-data";
 interface NavItem { title: string; url: string; icon: any; roles: Role[]; }
 
 const navItems: NavItem[] = [
-  { title: "Tổng quan", url: "/", icon: LayoutDashboard, roles: ["admin", "advisor", "student"] },
-  { title: "Quản lý sinh viên", url: "/students", icon: Users, roles: ["admin", "advisor"] },
-  { title: "Đánh giá điểm rèn luyện", url: "/evaluations", icon: ClipboardList, roles: ["admin", "advisor", "student"] },
-  { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "admin"] },
+  { title: "Tổng quan", url: "/", icon: LayoutDashboard, roles: ["admin", "advisor", "student", "organizer", "class_monitor", "student_affairs", "academic_affairs"] },
   { title: "Điểm của tôi", url: "/my-scores", icon: UserIcon, roles: ["student"] },
-  { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin"] },
+  { title: "Quản lý hoạt động", url: "/activities", icon: CalendarDays, roles: ["student", "organizer", "class_monitor", "advisor", "student_affairs", "admin"] },
+  { title: "Quản lý lớp học", url: "/classes", icon: GraduationCap, roles: ["admin", "class_monitor", "advisor", "student_affairs", "academic_affairs"] },
+  { title: "Rà soát lớp", url: "/class-review", icon: ClipboardCheck, roles: ["class_monitor"] },
+  { title: "Đánh giá điểm rèn luyện", url: "/evaluations", icon: ClipboardList, roles: ["admin", "advisor", "student", "class_monitor"] },
+  { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "student_affairs", "admin"] },
+  { title: "Đồng bộ điểm học tập", url: "/data-sync", icon: RefreshCw, roles: ["academic_affairs", "admin"] },
+  { title: "Quản lý sinh viên", url: "/students", icon: Users, roles: ["admin", "advisor", "student_affairs"] },
+  { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin", "student_affairs"] },
   { title: "Cấu hình hệ thống", url: "/settings", icon: Settings, roles: ["admin"] },
 ];
 
@@ -34,12 +39,12 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-hero shadow-glow">
-            <GraduationCap className="h-5 w-5 text-white" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl overflow-hidden bg-background border shadow-sm">
+            <img src="/logo.jpg" alt="ITC Logo" className="h-full w-full object-contain" />
           </div>
           {!collapsed && (
             <div className="overflow-hidden">
-              <p className="font-display font-bold text-sidebar-foreground leading-tight">EduPoint</p>
+              <p className="font-display font-bold text-sidebar-foreground leading-tight">ITC Point</p>
               <p className="text-xs text-sidebar-foreground/60">Quản lý điểm rèn luyện</p>
             </div>
           )}

@@ -1,4 +1,4 @@
-export type Role = "admin" | "advisor" | "student";
+export type Role = "admin" | "advisor" | "student" | "organizer" | "class_monitor" | "student_affairs" | "academic_affairs";
 
 export interface User {
   id: string;
@@ -23,16 +23,37 @@ export interface Student {
   phone: string;
 }
 
+export interface ClassInfo {
+  id: string;
+  name: string;
+  faculty: string;
+  advisorId?: string; // ID of the academic advisor (advisor User)
+  cohort: string;
+}
+
+
+export interface SubItem {
+  id: string;
+  name: string;
+  maxScore: number;
+}
+
+export interface GroupCriterion {
+  id: string;
+  name: string;
+  subItems: SubItem[];
+}
+
 export interface Criterion {
   id: string;
   code: string;
   name: string;
   maxScore: number;
   description: string;
-  subCriteria?: { id: string; name: string; maxScore: number }[];
+  groups?: GroupCriterion[];
 }
 
-export type EvaluationStatus = "draft" | "pending" | "approved" | "rejected";
+export type EvaluationStatus = "draft" | "class_pending" | "advisor_pending" | "pending" | "approved" | "rejected";
 
 export interface Evaluation {
   id: string;
@@ -47,13 +68,74 @@ export interface Evaluation {
   submittedAt: string;
   reviewedBy?: string;
   reviewNote?: string;
+  academicScoreSynced?: boolean; // synced from academic affairs
+  classConfirmed?: boolean; // confirmed by class monitor
+}
+
+export interface Activity {
+  id: string;
+  title: string;
+  description: string;
+  points: number;
+  criterionId: string;
+  date: string;
+  organizer: string;
+  status: "upcoming" | "completed";
+  participants: { studentId: string; fullName: string; className: string; status: "registered" | "attended" | "evidence_submitted"; evidenceUrl?: string }[];
 }
 
 export const mockUsers: User[] = [
   { id: "u1", username: "admin", password: "admin123", fullName: "Nguyễn Quản Trị", role: "admin", email: "admin@university.edu.vn" },
   { id: "u2", username: "advisor", password: "advisor123", fullName: "TS. Trần Văn Cố Vấn", role: "advisor", email: "advisor@university.edu.vn" },
   { id: "u3", username: "student", password: "student123", fullName: "Lê Minh Sinh Viên", role: "student", email: "sv001@university.edu.vn", studentId: "SV001" },
+  { id: "u4", username: "organizer", password: "organizer123", fullName: "Đoàn Thanh Niên", role: "organizer", email: "doanthanhnien@university.edu.vn" },
+  { id: "u5", username: "monitor", password: "monitor123", fullName: "Nguyễn Văn Lớp Trưởng", role: "class_monitor", email: "sv002@university.edu.vn", studentId: "SV002" },
+  { id: "u6", username: "affairs", password: "affairs123", fullName: "Phòng Công tác Sinh viên", role: "student_affairs", email: "ctsv@university.edu.vn" },
+  { id: "u7", username: "academic", password: "academic123", fullName: "Phòng Đào tạo", role: "academic_affairs", email: "daotao@university.edu.vn" },
+  { id: "u8", username: "advisor2", password: "advisor123", fullName: "ThS. Nguyễn Thị Cố Vấn", role: "advisor", email: "advisor2@university.edu.vn" },
+  { id: "u9", username: "advisor3", password: "advisor123", fullName: "ThS. Phạm Hoàng Nam", role: "advisor", email: "advisor3@university.edu.vn" },
 ];
+
+export const mockClasses: ClassInfo[] = [
+  { id: "c-1", name: "CNTT-K20A", faculty: "Công nghệ Thông tin", advisorId: "u2", cohort: "K20" },
+  { id: "c-2", name: "CNTT-K20B", faculty: "Công nghệ Thông tin", advisorId: "u8", cohort: "K20" },
+  { id: "c-3", name: "KT-K20A", faculty: "Kinh tế", advisorId: "u9", cohort: "K20" },
+  { id: "c-4", name: "CK-K20A", faculty: "Cơ khí", cohort: "K20" },
+  { id: "c-5", name: "DT-K20A", faculty: "Điện - Điện tử", cohort: "K20" },
+  { id: "c-6", name: "NN-K20A", faculty: "Ngoại ngữ", cohort: "K20" },
+];
+
+
+export const mockActivities: Activity[] = [
+  {
+    id: "act-1",
+    title: "Chiến dịch Mùa hè xanh 2026",
+    description: "Hoạt động tình nguyện hè hỗ trợ cộng đồng, xây dựng nông thôn mới.",
+    points: 10,
+    criterionId: "c3",
+    date: "2026-07-15",
+    organizer: "Đoàn Thanh Niên",
+    status: "upcoming",
+    participants: [
+      { studentId: "SV001", fullName: "Lê Minh Sinh Viên", className: "CNTT-K20A", status: "registered" }
+    ]
+  },
+  {
+    id: "act-2",
+    title: "Hội thảo Nghiên cứu khoa học sinh viên",
+    description: "Báo cáo các đề tài nghiên cứu khoa học cấp khoa/trường.",
+    points: 6,
+    criterionId: "c1",
+    date: "2026-05-10",
+    organizer: "Phòng Khoa học Công nghệ",
+    status: "completed",
+    participants: [
+      { studentId: "SV001", fullName: "Lê Minh Sinh Viên", className: "CNTT-K20A", status: "attended" },
+      { studentId: "SV002", fullName: "Nguyễn Văn Lớp Trưởng", className: "CNTT-K20A", status: "evidence_submitted", evidenceUrl: "https://example.com/certificate.pdf" }
+    ]
+  }
+];
+
 
 const faculties = ["Công nghệ Thông tin", "Kinh tế", "Cơ khí", "Điện - Điện tử", "Ngoại ngữ"];
 const classes = ["CNTT-K20A", "CNTT-K20B", "KT-K20A", "CK-K20A", "DT-K20A", "NN-K20A"];
@@ -80,53 +162,95 @@ export const mockStudents: Student[] = Array.from({ length: 48 }, (_, i) => {
 export const mockCriteria: Criterion[] = [
   {
     id: "c1", code: "I",
-    name: "Ý thức học tập",
+    name: "Trách nhiệm, tinh thần và thái độ trong học tập",
     maxScore: 20,
-    description: "Đánh giá ý thức và kết quả học tập của sinh viên",
-    subCriteria: [
-      { id: "c1-1", name: "Kết quả học tập trong học kỳ", maxScore: 14 },
-      { id: "c1-2", name: "Tham gia NCKH, hội thảo", maxScore: 6 },
-    ],
+    description: "Đánh giá tinh thần vượt khó, kết quả học tập và trách nhiệm tham gia các cuộc thi học thuật của sinh viên.",
+    groups: [
+      {
+        id: "g1-1",
+        name: "1. Tinh thần vượt khó, phấn đấu vươn lên trong học tập",
+        subItems: [
+          { id: "s1-1-a", name: "a. Có ý thức học tập, tham dự đầy đủ các giờ học", maxScore: 5 },
+          { id: "s1-1-b", name: "b. Đi học muộn 1 lần", maxScore: -1 },
+          { id: "s1-1-c", name: "c. Đi học muộn nhiều lần", maxScore: -2 },
+          { id: "s1-1-d", name: "d. Nghỉ học có phép", maxScore: -2 },
+          { id: "s1-1-e", name: "e. Nghỉ học không phép", maxScore: -5 },
+          { id: "s1-1-f", name: "f. Bỏ giờ học ra ngoài không lý do (Cúp tiết)", maxScore: -2 }
+        ]
+      },
+      {
+        id: "g1-2",
+        name: "2. Kết quả học tập",
+        subItems: [
+          { id: "s1-2-a", name: "a. Kết quả học tập trung bình Học kỳ đạt loại Xuất sắc", maxScore: 5 },
+          { id: "s1-2-b", name: "b. Kết quả học tập trung bình Học kỳ đạt loại Giỏi", maxScore: 3 },
+          { id: "s1-2-c", name: "c. Kết quả học tập trung bình Học kỳ đạt loại Khá", maxScore: 2 },
+          { id: "s1-2-d", name: "d. Đạt chứng chỉ nghề nghiệp (Tin học, Ngoại ngữ…)", maxScore: 2 }
+        ]
+      },
+      {
+        id: "g1-3",
+        name: "3. Trách nhiệm và tinh thần tham gia các kỳ thi, cuộc thi",
+        subItems: [
+          { id: "s1-3-a", name: "a. Không vi phạm quy chế kiểm tra, thi cử", maxScore: 5 },
+          { id: "s1-3-b", name: "b. Là thí sinh tham gia các cuộc thi học thuật do Khoa/ Nhà trường phát động", maxScore: 3 },
+          { id: "s1-3-c", name: "c. Đạt thành tích các cuộc thi học thuật ở mục 3b", maxScore: 4 }
+        ]
+      }
+    ]
   },
   {
     id: "c2", code: "II",
-    name: "Ý thức chấp hành nội quy",
+    name: "Trách nhiệm chấp hành pháp luật và nội quy, quy chế",
     maxScore: 25,
-    description: "Chấp hành nội quy nhà trường, pháp luật",
-    subCriteria: [
-      { id: "c2-1", name: "Chấp hành nội quy nhà trường", maxScore: 15 },
-      { id: "c2-2", name: "Chấp hành pháp luật của Nhà nước", maxScore: 10 },
-    ],
+    description: "Đánh giá việc chấp hành luật pháp, an toàn giao thông và các quy chế học tập, sinh hoạt của nhà trường.",
+    groups: [
+      {
+        id: "g2-1",
+        name: "1. Chấp hành các quy định pháp luật và văn bản chỉ đạo",
+        subItems: [
+          { id: "s2-1-a", name: "a. Không vi phạm pháp luật, chủ trương các cấp", maxScore: 5 },
+          { id: "s2-1-b", name: "b. Không vi phạm nội quy thông báo khác của nhà trường", maxScore: 5 }
+        ]
+      },
+      {
+        id: "g2-2",
+        name: "2. Chấp hành nội quy, quy chế trường lớp",
+        subItems: [
+          { id: "s2-2-a", name: "a. Tham gia đầy đủ sinh hoạt lớp", maxScore: 5 },
+          { id: "s2-2-b", name: "b. Tham gia đầy đủ sinh hoạt công dân HSSV", maxScore: 4 },
+          { id: "s2-2-c", name: "c. Đóng học phí đúng hạn", maxScore: 5 },
+          { id: "s2-2-d", name: "d. Vi phạm xử lý kỷ luật khiển trách", maxScore: -5 },
+          { id: "s2-2-e", name: "e. Vi phạm xử lý kỷ luật cảnh cáo", maxScore: -10 }
+        ]
+      }
+    ]
   },
   {
     id: "c3", code: "III",
-    name: "Hoạt động chính trị - xã hội",
+    name: "Hoạt động chính trị - xã hội, văn hóa, thể thao",
     maxScore: 20,
-    description: "Tham gia các hoạt động đoàn thể, tình nguyện",
-    subCriteria: [
-      { id: "c3-1", name: "Hoạt động Đoàn - Hội", maxScore: 10 },
-      { id: "c3-2", name: "Hoạt động tình nguyện, cộng đồng", maxScore: 10 },
-    ],
-  },
-  {
-    id: "c4", code: "IV",
-    name: "Quan hệ công dân, cộng đồng",
-    maxScore: 25,
-    description: "Quan hệ với bạn bè, thầy cô, cộng đồng",
-    subCriteria: [
-      { id: "c4-1", name: "Có tinh thần đoàn kết, giúp đỡ", maxScore: 15 },
-      { id: "c4-2", name: "Tham gia hoạt động cộng đồng", maxScore: 10 },
-    ],
-  },
-  {
-    id: "c5", code: "V",
-    name: "Phụ trách lớp, đoàn thể",
-    maxScore: 10,
-    description: "Vai trò cán bộ lớp, Đoàn, Hội",
-    subCriteria: [
-      { id: "c5-1", name: "Cán bộ lớp / Đoàn / Hội", maxScore: 10 },
-    ],
-  },
+    description: "Tham gia các chiến dịch tình nguyện, câu lạc bộ, hoạt động Đoàn - Hội và tuyên truyền pháp luật.",
+    groups: [
+      {
+        id: "g3-1",
+        name: "1. Hoạt động chính trị - xã hội, phong trào Đoàn - Hội",
+        subItems: [
+          { id: "s3-1-a", name: "a. Có tham gia hoạt động cấp Khoa, cấp Trường", maxScore: 3 },
+          { id: "s3-1-b", name: "b. Có tham gia hoạt động từ cấp Thành phố trở lên", maxScore: 5 },
+          { id: "s3-1-c", name: "c. Tích cực tham gia hoạt động Đoàn - Hội", maxScore: 3 }
+        ]
+      },
+      {
+        id: "g3-2",
+        name: "2. Hoạt động công ích, tình nguyện xã hội",
+        subItems: [
+          { id: "s3-2-a", name: "a. Tham gia Mùa hè xanh, Tiếp sức mùa thi, Hiến máu nhân đạo...", maxScore: 5 },
+          { id: "s3-2-b", name: "b. Được khen thưởng trong hoạt động tình nguyện", maxScore: 10 }
+        ]
+      }
+    ]
+  }
 ];
 
 export function classify(total: number): string {
