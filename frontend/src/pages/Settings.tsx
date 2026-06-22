@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Settings as SettingsIcon, Bell, Database, Lock, Calendar, Shield, Plus, Edit2, Trash2 } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { Settings as SettingsIcon, Bell, Database, Lock, Calendar, Shield, Plus, Edit2, Trash2, Key, ShieldAlert, Copy, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -8,74 +8,207 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { mockUsers, User, Role } from "@/lib/mock-data";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { User, Role } from "@/lib/mock-data";
+import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
-  const [users, setUsers] = useState<User[]>(mockUsers);
+  const { allUsers, fetchUsers } = useAuth();
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
   // User form states
   const [nameInput, setNameInput] = useState("");
-  const [usernameInput, setUsernameInput] = useState("");
+  const [studentIdInput, setStudentIdInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
-  const [roleInput, setRoleInput] = useState<Role>("student");
+  const [roleInput, setRoleInput] = useState<Role>("advisor");
 
-  const handleRoleChange = (userId: string, newRole: Role) => {
-    setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
-    toast.success("Thay đổi phân quyền thành công! Hãy lưu cấu hình để áp dụng.");
+  // State to show newly generated passwords (on create or reset)
+  const [passwordModal, setPasswordModal] = useState<{
+    isOpen: boolean;
+    username: string;
+    studentId: string;
+    pass: string;
+    type: "create" | "reset";
+  }>({
+    isOpen: false,
+    username: "",
+    studentId: "",
+    pass: "",
+    type: "create"
+  });
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleRoleChange = async (userId: string, newRole: Role) => {
+    try {
+      const res = await fetch(`${API_URL}/users/${userId}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole })
+      });
+      if (res.ok) {
+        toast.success("Đã cập nhật vai trò người dùng");
+        fetchUsers();
+      } else {
+        toast.error("Không thể cập nhật vai trò");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
+  };
+
+  const handleToggleActive = async (userId: string, currentStatus: boolean) => {
+    try {
+      const res = await fetch(`${API_URL}/users/${userId}/toggle-active/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      if (res.ok) {
+        toast.success(`Đã ${!currentStatus ? "mở" : "đóng"} tài khoản người dùng thành công!`);
+        fetchUsers();
+      } else {
+        toast.error("Không thể thay đổi trạng thái tài khoản");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
   const handleAddClick = () => {
     setEditingUser(null);
     setNameInput("");
-    setUsernameInput("");
+    setStudentIdInput("");
     setEmailInput("");
-    setRoleInput("student");
+    setRoleInput("advisor");
     setIsUserDialogOpen(true);
   };
 
   const handleEditClick = (u: User) => {
     setEditingUser(u);
     setNameInput(u.fullName);
-    setUsernameInput(u.username);
+    setStudentIdInput(u.studentId || u.username);
     setEmailInput(u.email);
     setRoleInput(u.role);
     setIsUserDialogOpen(true);
   };
 
-  const handleDeleteUser = (userId: string) => {
-    setUsers(users.filter(u => u.id !== userId));
-    toast.success("Đã xóa người dùng thành công!");
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/users/${userId}/`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        toast.success("Đã xóa người dùng thành công!");
+        fetchUsers();
+      } else {
+        toast.error("Không thể xóa người dùng");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
-  const handleUserSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingUser) {
-      setUsers(users.map(u => u.id === editingUser.id ? { ...u, fullName: nameInput, username: usernameInput, email: emailInput, role: roleInput } : u));
-      toast.success("Cập nhật thông tin người dùng thành công!");
-    } else {
-      const newUser: User = {
-        id: `u-${Date.now()}`,
-        fullName: nameInput,
-        username: usernameInput,
-        password: "password123",
-        email: emailInput,
-        role: roleInput
-      };
-      setUsers([...users, newUser]);
-      toast.success("Thêm người dùng mới thành công!");
+  const handleResetPassword = async (u: User) => {
+    try {
+      const res = await fetch(`${API_URL}/users/${u.id}/reset-password/`, {
+        method: "POST"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPasswordModal({
+          isOpen: true,
+          username: u.fullName,
+          studentId: u.studentId || u.username,
+          pass: data.password,
+          type: "reset"
+        });
+        fetchUsers();
+      } else {
+        toast.error("Không thể reset mật khẩu");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
     }
-    setIsUserDialogOpen(false);
+  };
+
+  const handleUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nameInput || !emailInput || (editingUser && !studentIdInput)) {
+      toast.error("Vui lòng nhập đầy đủ thông tin");
+      return;
+    }
+
+    if (editingUser) {
+      try {
+        const res = await fetch(`${API_URL}/users/${editingUser.id}/`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            full_name: nameInput,
+            student_id: studentIdInput,
+            email: emailInput,
+            role: roleInput
+          })
+        });
+        if (res.ok) {
+          toast.success("Cập nhật thông tin người dùng thành công!");
+          setIsUserDialogOpen(false);
+          fetchUsers();
+        } else {
+          toast.error("Không thể cập nhật thông tin");
+        }
+      } catch (err) {
+        toast.error("Lỗi kết nối máy chủ");
+      }
+    } else {
+      try {
+        const res = await fetch(`${API_URL}/users/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fullName: nameInput,
+            studentId: studentIdInput,
+            email: emailInput,
+            role: roleInput
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setIsUserDialogOpen(false);
+          setPasswordModal({
+            isOpen: true,
+            username: nameInput,
+            studentId: data.user.studentId || data.user.student_id || data.user.username || studentIdInput,
+            pass: data.password,
+            type: "create"
+          });
+          fetchUsers();
+        } else {
+          const errData = await res.json();
+          toast.error(errData.error || "Không thể tạo tài khoản");
+        }
+      } catch (err) {
+        toast.error("Lỗi kết nối máy chủ");
+      }
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success("Đã sao chép mật khẩu vào bộ nhớ tạm!");
   };
 
   return (
     <div className="space-y-6 pb-24">
-      <div>
-        <h1 className="font-display text-3xl font-bold flex items-center gap-3"><SettingsIcon className="h-7 w-7 text-primary" />Cấu hình hệ thống</h1>
-        <p className="text-muted-foreground mt-1">Quản lý cài đặt chung của hệ thống điểm rèn luyện.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-bold flex items-center gap-3"><SettingsIcon className="h-7 w-7 text-primary" />Cấu hình hệ thống</h1>
+          <p className="text-muted-foreground mt-1">Quản lý cài đặt chung và tài khoản người dùng trong hệ thống điểm rèn luyện.</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -114,47 +247,19 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-md">
-          <CardHeader><CardTitle className="font-display flex items-center gap-2"><Lock className="h-5 w-5 text-primary" />Bảo mật</CardTitle>
-            <CardDescription>Quyền hạn và bảo mật hệ thống</CardDescription></CardHeader>
-          <CardContent className="space-y-4">
-            {[
-              { l: "Sinh viên tự đánh giá", d: "Cho phép SV nhập điểm trước" },
-              { l: "Yêu cầu duyệt 2 cấp", d: "Cố vấn + Trưởng khoa" },
-              { l: "Khoá khi đã duyệt", d: "Không thể sửa sau khi duyệt" },
-            ].map(s => (
-              <div key={s.l} className="flex items-center justify-between p-3 rounded-lg border">
-                <div><p className="font-medium text-sm">{s.l}</p><p className="text-xs text-muted-foreground">{s.d}</p></div>
-                <Switch defaultChecked={s.l !== "Sinh viên tự đánh giá"} />
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card className="border-0 shadow-md">
-          <CardHeader><CardTitle className="font-display flex items-center gap-2"><Database className="h-5 w-5 text-primary" />Sao lưu dữ liệu</CardTitle>
-            <CardDescription>Quản lý sao lưu và phục hồi</CardDescription></CardHeader>
-          <CardContent className="space-y-3">
-            <div className="p-4 rounded-xl bg-gradient-card border">
-              <p className="text-sm text-muted-foreground">Lần sao lưu gần nhất</p>
-              <p className="font-display font-bold mt-1">09/06/2026, 03:00</p>
-            </div>
-            <Button variant="outline" className="w-full">Sao lưu ngay</Button>
-            <Button variant="outline" className="w-full">Xuất toàn bộ dữ liệu</Button>
-          </CardContent>
-        </Card>
-
         {/* Roles and Permissions Section */}
         <Card className="border-0 shadow-md lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
             <div>
               <CardTitle className="font-display flex items-center gap-2">
-                <Shield className="h-5 w-5 text-primary" /> Phân quyền người dùng
+                <Shield className="h-5 w-5 text-primary" /> Quản lý tài khoản và Phân quyền
               </CardTitle>
-              <CardDescription className="mt-1">Quản lý vai trò (roles) và điều chỉnh các quyền hạn truy cập của cán bộ, sinh viên trong hệ thống.</CardDescription>
+              <CardDescription className="mt-1">
+                Tạo tài khoản mới, cấp mật khẩu ngẫu nhiên, reset mật khẩu, kích hoạt hoặc khóa tài khoản hệ thống.
+              </CardDescription>
             </div>
             <Button onClick={handleAddClick} className="bg-gradient-primary gap-2 text-xs">
-              <Plus className="h-4 w-4" />Thêm người dùng
+              <Plus className="h-4 w-4" />Thêm tài khoản mới
             </Button>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
@@ -162,39 +267,31 @@ export default function SettingsPage() {
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
                   <TableHead>Họ và tên</TableHead>
-                  <TableHead>Tên đăng nhập</TableHead>
+                  <TableHead>Mã số đăng nhập</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Quyền hiện tại</TableHead>
-                  <TableHead>Thay đổi quyền hạn</TableHead>
+                  <TableHead>Trạng thái</TableHead>
                   <TableHead className="text-right">Thao tác</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map(u => (
+                {allUsers.filter(u => u.role !== "student" && u.role !== "class_monitor").map(u => (
                   <TableRow key={u.id} className="hover:bg-muted/20">
-                    <TableCell className="font-medium">{u.fullName}</TableCell>
-                    <TableCell className="font-mono text-sm">{u.username}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{u.email}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className="capitalize text-xs font-semibold">
-                        {u.role === "student" && "Sinh viên"}
-                        {u.role === "organizer" && "Đơn vị tổ chức"}
-                        {u.role === "class_monitor" && "Ban cán sự lớp"}
-                        {u.role === "advisor" && "Cố vấn học tập"}
-                        {u.role === "student_affairs" && "Phòng CTSV"}
-                        {u.role === "academic_affairs" && "Phòng Đào tạo"}
-                        {u.role === "admin" && "Quản trị hệ thống"}
-                      </Badge>
+                      <div className="font-medium">{u.fullName}</div>
+                      {u.isFirstLogin && (
+                        <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">Đăng nhập lần đầu</span>
+                      )}
                     </TableCell>
+                    <TableCell className="font-mono text-sm">{u.studentId || u.username}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{u.email}</TableCell>
                     <TableCell>
                       <Select value={u.role} onValueChange={(r) => handleRoleChange(u.id, r as Role)}>
                         <SelectTrigger className="w-[170px] h-9">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="student">Sinh viên</SelectItem>
                           <SelectItem value="organizer">Đơn vị tổ chức</SelectItem>
-                          <SelectItem value="class_monitor">Ban cán sự lớp</SelectItem>
                           <SelectItem value="advisor">Cố vấn học tập</SelectItem>
                           <SelectItem value="student_affairs">Phòng CTSV</SelectItem>
                           <SelectItem value="academic_affairs">Phòng Đào tạo</SelectItem>
@@ -202,8 +299,28 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Switch 
+                          checked={u.isActive !== false} 
+                          onCheckedChange={() => handleToggleActive(u.id, u.isActive !== false)} 
+                        />
+                        <span className={`text-xs font-semibold ${u.isActive !== false ? "text-success" : "text-destructive"}`}>
+                          {u.isActive !== false ? "Đang mở" : "Đã khóa"}
+                        </span>
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-8 w-8 text-amber-600 hover:text-amber-700" 
+                          onClick={() => handleResetPassword(u)}
+                          title="Cấp lại mật khẩu mới"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        </Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8 text-primary" onClick={() => handleEditClick(u)}>
                           <Edit2 className="h-3.5 w-3.5" />
                         </Button>
@@ -225,20 +342,27 @@ export default function SettingsPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="font-display">
-              {editingUser ? "Chỉnh sửa người dùng" : "Thêm người dùng mới"}
+              {editingUser ? "Chỉnh sửa tài khoản" : "Tạo tài khoản mới"}
             </DialogTitle>
+            <DialogDescription>
+              {editingUser 
+                ? "Cập nhật các trường thông tin cơ bản cho tài khoản." 
+                : "Mật khẩu ngẫu nhiên sẽ được sinh tự động sau khi tạo và yêu cầu người dùng đổi mật khẩu ở lần đăng nhập kế tiếp."}
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUserSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Họ và tên</Label>
+              <Label htmlFor="name">Họ và tên *</Label>
               <Input id="name" value={nameInput} onChange={e => setNameInput(e.target.value)} required placeholder="Ví dụ: Nguyễn Văn A" />
             </div>
+            {editingUser && (
+              <div className="space-y-2">
+                <Label htmlFor="studentId">Mã số đăng nhập</Label>
+                <Input id="studentId" value={studentIdInput} disabled className="bg-muted" />
+              </div>
+            )}
             <div className="space-y-2">
-              <Label htmlFor="username">Tên đăng nhập</Label>
-              <Input id="username" value={usernameInput} onChange={e => setUsernameInput(e.target.value)} required placeholder="Ví dụ: nguyenvala" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Email *</Label>
               <Input id="email" type="email" value={emailInput} onChange={e => setEmailInput(e.target.value)} required placeholder="user@university.edu.vn" />
             </div>
             <div className="space-y-2">
@@ -246,9 +370,7 @@ export default function SettingsPage() {
               <Select value={roleInput} onValueChange={(r) => setRoleInput(r as Role)}>
                 <SelectTrigger id="role"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="student">Sinh viên</SelectItem>
                   <SelectItem value="organizer">Đơn vị tổ chức hoạt động</SelectItem>
-                  <SelectItem value="class_monitor">Ban cán sự lớp</SelectItem>
                   <SelectItem value="advisor">Cố vấn học tập</SelectItem>
                   <SelectItem value="student_affairs">Phòng Công tác SV</SelectItem>
                   <SelectItem value="academic_affairs">Phòng Đào tạo</SelectItem>
@@ -259,18 +381,47 @@ export default function SettingsPage() {
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsUserDialogOpen(false)}>Hủy</Button>
               <Button type="submit" className="bg-gradient-primary">
-                {editingUser ? "Cập nhật" : "Tạo mới"}
+                {editingUser ? "Cập nhật" : "Tạo mới & Sinh mật khẩu"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Fixed bottom bar */}
-      <div className="fixed bottom-0 right-0 left-0 md:left-[var(--sidebar-width,16rem)] z-20 bg-card/90 backdrop-blur-md p-4 border-t flex justify-end gap-2 shadow-lg transition-all duration-200">
-        <Button variant="outline">Khôi phục mặc định</Button>
-        <Button className="bg-gradient-primary" onClick={() => toast.success("Đã lưu cấu hình và phân quyền mới thành công!")}>Lưu thay đổi</Button>
-      </div>
+      {/* Password Output Dialog */}
+      <Dialog open={passwordModal.isOpen} onOpenChange={(o) => { if (!o) setPasswordModal(prev => ({ ...prev, isOpen: false })); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2 text-success">
+              <ShieldAlert className="h-5 w-5" />
+              {passwordModal.type === "create" ? "Tạo tài khoản thành công!" : "Reset mật khẩu thành công!"}
+            </DialogTitle>
+            <DialogDescription>
+              Hãy lưu lại mật khẩu ngẫu nhiên này để cung cấp cho người dùng đăng nhập lần đầu.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="p-4 rounded-xl border bg-muted/30 space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Tài khoản (Mã số):</p>
+              <p className="font-bold text-sm">{passwordModal.studentId}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Mật khẩu mới (Tạo ngẫu nhiên):</p>
+              <div className="flex items-center justify-between gap-2 mt-1">
+                <span className="font-mono font-bold text-lg text-primary select-all">{passwordModal.pass}</span>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" onClick={() => copyToClipboard(passwordModal.pass)}>
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button className="w-full bg-gradient-primary" onClick={() => setPasswordModal(prev => ({ ...prev, isOpen: false }))}>
+              Đóng và tiếp tục
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

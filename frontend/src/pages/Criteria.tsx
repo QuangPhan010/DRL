@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, Plus, Edit, Trash2, Settings2, FolderPlus, FilePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { mockCriteria, Criterion, GroupCriterion, SubItem } from "@/lib/mock-data";
+import { Criterion, GroupCriterion } from "@/lib/mock-data";
+import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const classifications = [
@@ -21,9 +22,46 @@ const classifications = [
 ];
 
 export default function Criteria() {
-  const [criteria, setCriteria] = useState<Criterion[]>(mockCriteria);
+  const [criteria, setCriteria] = useState<Criterion[]>([]);
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Criterion | null>(null);
+
+  const fetchCriteria = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/criteria/`);
+      if (res.ok) {
+        const data = await res.json();
+        const mapped = data.map((c: any) => ({
+          id: c.id.toString(),
+          code: c.code,
+          name: c.name,
+          maxScore: c.max_score,
+          description: c.description || "",
+          groups: c.groups ? c.groups.map((g: any) => ({
+            id: g.id.toString(),
+            name: g.name,
+            subItems: g.subItems ? g.subItems.map((s: any) => ({
+              id: s.id.toString(),
+              name: s.name,
+              maxScore: s.max_score
+            })) : []
+          })) : []
+        }));
+        setCriteria(mapped);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi tải cấu trúc tiêu chí");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCriteria();
+  }, []);
   
   // Form states matching 3-level structure
   const [code, setCode] = useState("");
@@ -99,7 +137,7 @@ export default function Criteria() {
     }));
   };
 
-  const updateSubItemScore = (gId: string, sId: string, score: number) => {
+  const updateSubItemScore = (gId: string, sId: string, score: any) => {
     setGroups(groups.map(g => {
       if (g.id === gId) {
         return {
@@ -134,8 +172,11 @@ export default function Criteria() {
     groups.forEach(g => {
       g.subItems.forEach(s => {
         hasSubItems = true;
-        if (s.maxScore > 0) {
-          sum += s.maxScore;
+        // Parse raw string state to number
+        const sScore = typeof s.maxScore === "string" ? (parseInt(s.maxScore) || 0) : s.maxScore;
+        s.maxScore = sScore;
+        if (sScore > 0) {
+          sum += sScore;
         }
       });
     });
@@ -208,56 +249,62 @@ export default function Criteria() {
           <CardDescription>Tiêu chí lớn (Cấp 1) → Nhóm tiêu chí (Cấp 2) → Tiêu chí chi tiết điểm cộng/trừ (Cấp 3)</CardDescription>
         </CardHeader>
         <CardContent>
-          <Accordion type="multiple" className="space-y-3">
-            {criteria.map(c => (
-              <AccordionItem key={c.id} value={c.id} className="border rounded-xl px-4 bg-gradient-card">
-                <AccordionTrigger className="hover:no-underline py-4">
-                  <div className="flex items-center gap-3 flex-1 text-left">
-                    <div className="h-10 w-10 rounded-xl bg-gradient-primary flex items-center justify-center text-white font-display font-bold shrink-0">
-                      {c.code}
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-semibold text-base">{c.name}</p>
-                      <p className="text-xs text-muted-foreground font-normal mt-0.5">{c.description}</p>
-                    </div>
-                    <Badge variant="secondary" className="mr-2 text-xs h-6 px-2.5">Tối đa {c.maxScore}đ</Badge>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent className="pb-4">
-                  <div className="space-y-4 pl-12 pt-2 border-l border-primary/10 ml-5">
-                    {c.groups?.map(g => (
-                      <div key={g.id} className="space-y-2">
-                        <p className="text-xs font-bold text-primary uppercase tracking-wider">{g.name}</p>
-                        <div className="space-y-1.5 pl-3 border-l-2 border-muted">
-                          {g.subItems.map(s => (
-                            <div key={s.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/40 text-sm">
-                              <span>{s.name}</span>
-                              <Badge variant={s.maxScore < 0 ? "destructive" : "outline"} className={s.maxScore < 0 ? "border-0" : "bg-primary/5 text-primary border-primary/10"}>
-                                {s.maxScore < 0 ? `${s.maxScore} điểm` : `+${s.maxScore} điểm`}
-                              </Badge>
-                            </div>
-                          ))}
-                        </div>
+          {loading ? (
+            <div className="text-center py-12 text-muted-foreground">
+              Đang tải danh sách tiêu chí...
+            </div>
+          ) : (
+            <Accordion type="multiple" className="space-y-3">
+              {criteria.map(c => (
+                <AccordionItem key={c.id} value={c.id} className="border rounded-xl px-4 bg-gradient-card">
+                  <AccordionTrigger className="hover:no-underline py-4">
+                    <div className="flex items-center gap-3 flex-1 text-left">
+                      <div className="h-10 w-10 rounded-xl bg-gradient-primary flex items-center justify-center text-white font-display font-bold shrink-0">
+                        {c.code}
                       </div>
-                    ))}
-
-                    {(!c.groups || c.groups.length === 0) && (
-                      <p className="text-sm text-muted-foreground">Chưa cấu hình nhóm tiêu chí con cho mục này.</p>
-                    )}
-
-                    <div className="flex gap-2 pt-3 border-t">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(c)} className="gap-1 h-8">
-                        <Edit className="h-3.5 w-3.5" />Sửa cấu trúc
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => remove(c.id)} className="gap-1 h-8 text-destructive hover:text-destructive border-destructive/20">
-                        <Trash2 className="h-3.5 w-3.5" />Xóa mục lớn
-                      </Button>
+                      <div className="flex-1">
+                        <p className="font-semibold text-base">{c.name}</p>
+                        <p className="text-xs text-muted-foreground font-normal mt-0.5">{c.description}</p>
+                      </div>
+                      <Badge variant="secondary" className="mr-2 text-xs h-6 px-2.5">Tối đa {c.maxScore}đ</Badge>
                     </div>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-4">
+                    <div className="space-y-4 pl-12 pt-2 border-l border-primary/10 ml-5">
+                      {c.groups?.map(g => (
+                        <div key={g.id} className="space-y-2">
+                          <p className="text-xs font-bold text-primary uppercase tracking-wider">{g.name}</p>
+                          <div className="space-y-1.5 pl-3 border-l-2 border-muted">
+                            {g.subItems.map(s => (
+                              <div key={s.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/40 text-sm">
+                                <span>{s.name}</span>
+                                <Badge variant={s.maxScore < 0 ? "destructive" : "outline"} className={s.maxScore < 0 ? "border-0" : "bg-primary/5 text-primary border-primary/10"}>
+                                  {s.maxScore < 0 ? `${s.maxScore} điểm` : `+${s.maxScore} điểm`}
+                                </Badge>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+
+                      {(!c.groups || c.groups.length === 0) && (
+                        <p className="text-sm text-muted-foreground">Chưa cấu hình nhóm tiêu chí con cho mục này.</p>
+                      )}
+
+                      <div className="flex gap-2 pt-3 border-t">
+                        <Button variant="outline" size="sm" onClick={() => openEdit(c)} className="gap-1 h-8">
+                          <Edit className="h-3.5 w-3.5" />Sửa cấu trúc
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => remove(c.id)} className="gap-1 h-8 text-destructive hover:text-destructive border-destructive/20">
+                          <Trash2 className="h-3.5 w-3.5" />Xóa mục lớn
+                        </Button>
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          )}
         </CardContent>
       </Card>
 
@@ -328,7 +375,20 @@ export default function Criteria() {
                         {g.subItems.map((s, sIdx) => (
                           <div key={s.id} className="flex gap-2 items-center">
                             <Input className="flex-1 text-sm h-8" placeholder="a. Có ý thức đi học đầy đủ..." value={s.name} onChange={e => updateSubItemName(g.id, s.id, e.target.value)} />
-                            <Input className="w-[85px] text-sm h-8 font-mono text-center" type="number" placeholder="Điểm" value={s.maxScore} onChange={e => updateSubItemScore(g.id, s.id, parseInt(e.target.value) || 0)} />
+                            <Input 
+                              className="w-[85px] text-sm h-8 font-mono text-center" 
+                              type="text" 
+                              placeholder="Điểm" 
+                              value={s.maxScore} 
+                              onChange={e => {
+                                const val = e.target.value;
+                                if (val === "" || val === "-") {
+                                  updateSubItemScore(g.id, s.id, val);
+                                } else {
+                                  updateSubItemScore(g.id, s.id, parseInt(val) || 0);
+                                }
+                              }} 
+                            />
                             <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive shrink-0" onClick={() => removeSubItem(g.id, s.id)}>
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>

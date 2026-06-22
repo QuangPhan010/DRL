@@ -21,6 +21,7 @@ export interface Student {
   cohort: string;
   gender: "Nam" | "Nữ";
   phone: string;
+  password?: string;
 }
 
 export interface ClassInfo {

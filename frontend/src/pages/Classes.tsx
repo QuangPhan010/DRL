@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Plus, Search, Edit, Trash2, Filter, Users as UsersIcon, GraduationCap, UserCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,16 +9,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
-import { mockClasses, mockStudents, mockUsers, facultiesList, Student, ClassInfo } from "@/lib/mock-data";
-import { useAuth } from "@/contexts/AuthContext";
+import { facultiesList, Student, ClassInfo } from "@/lib/mock-data";
+import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 export default function Classes() {
-  const { user } = useAuth();
+  const { user, allUsers, fetchUsers } = useAuth();
   
-  // State for Classes and Students
-  const [classes, setClasses] = useState<ClassInfo[]>(mockClasses);
-  const [students, setStudents] = useState<Student[]>(mockStudents);
+  // State for Classes, Students
+  const [classes, setClasses] = useState<ClassInfo[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
   
   // Filters
   const [search, setSearch] = useState("");
@@ -41,6 +42,59 @@ export default function Classes() {
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [newStudentId, setNewStudentId] = useState("");
 
+  const fetchClasses = async () => {
+    try {
+      const res = await fetch(`${API_URL}/classes/`);
+      if (res.ok) {
+        const data = await res.json();
+        const mapped = data.map((c: any) => ({
+          id: c.id.toString(),
+          name: c.name,
+          faculty: c.faculty,
+          cohort: c.cohort,
+          advisorId: c.advisor ? c.advisor.toString() : undefined
+        }));
+        setClasses(mapped);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi tải danh sách lớp học");
+    }
+  };
+
+  const fetchStudents = async () => {
+    try {
+      const res = await fetch(`${API_URL}/students/`);
+      if (res.ok) {
+        const data = await res.json();
+        const mapped = data.map((s: any) => ({
+          id: s.id.toString(),
+          studentId: s.student_id,
+          fullName: s.full_name,
+          email: s.email,
+          className: s.class_name || "",
+          faculty: s.faculty,
+          cohort: s.cohort,
+          gender: s.gender,
+          phone: s.phone
+        }));
+        setStudents(mapped);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi tải danh sách sinh viên");
+    }
+  };
+
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true);
+      await Promise.all([fetchClasses(), fetchStudents(), fetchUsers()]);
+      setLoading(false);
+    };
+    init();
+  }, []);
+
   // Role permissions checks
   const isAdmin = user?.role === "admin";
   const isAcademicAffairs = user?.role === "academic_affairs" || isAdmin;
@@ -50,17 +104,22 @@ export default function Classes() {
   const canAssignAdvisor = isStudentAffairs || isAcademicAffairs;
 
   // Filter advisors from users
-  const advisors = useMemo(() => mockUsers.filter(u => u.role === "advisor"), []);
+  const advisors = useMemo(() => allUsers.filter(u => u.role === "advisor"), [allUsers]);
+
+  const isAdvisor = user?.role === "advisor";
 
   // Filtered classes list
   const filteredClasses = useMemo(() => {
     return classes.filter(c => {
+      if (isAdvisor && c.advisorId !== user?.id?.toString()) {
+        return false;
+      }
       const q = search.toLowerCase();
       const matchQ = !q || c.name.toLowerCase().includes(q) || c.faculty.toLowerCase().includes(q);
       const matchF = facultyFilter === "all" || c.faculty === facultyFilter;
       return matchQ && matchF;
     });
-  }, [classes, search, facultyFilter]);
+  }, [classes, search, facultyFilter, isAdvisor, user]);
 
   // Students in selected class
   const classStudents = useMemo(() => {
@@ -73,6 +132,12 @@ export default function Classes() {
     if (!selectedClass) return [];
     return students.filter(s => s.className !== selectedClass.name);
   }, [students, selectedClass]);
+
+  // Whether current user is the advisor for the selected class (or admin/affairs)
+  const canAppointMonitor = useMemo(() => {
+    if (!selectedClass || !user) return false;
+    return selectedClass.advisorId === user.id?.toString() || user.role === "admin" || user.role === "student_affairs";
+  }, [selectedClass, user]);
 
   const openCreateClass = () => {
     setEditingClass(null);
@@ -96,57 +161,143 @@ export default function Classes() {
     setIsClassDialogOpen(true);
   };
 
-  const handleSaveClass = () => {
+  const handleSaveClass = async () => {
     if (!classForm.name) {
       toast.error("Vui lòng nhập tên lớp");
       return;
     }
     
-    if (editingClass) {
-      setClasses(classes.map(c => c.id === editingClass.id ? { ...c, ...classForm, advisorId: classForm.advisorId || undefined } : c));
-      toast.success("Đã cập nhật lớp học thành công");
-    } else {
-      // Check duplicate
-      if (classes.some(c => c.name.toLowerCase() === classForm.name.toLowerCase())) {
-        toast.error("Tên lớp học đã tồn tại");
-        return;
-      }
-      const newClass: ClassInfo = {
-        id: `c-${Date.now()}`,
-        ...classForm,
-        advisorId: classForm.advisorId || undefined,
-      };
-      setClasses([...classes, newClass]);
-      toast.success("Đã tạo lớp học mới thành công");
+    if (!editingClass && classes.some(c => c.name.toLowerCase() === classForm.name.toLowerCase())) {
+      toast.error("Tên lớp học đã tồn tại");
+      return;
     }
-    setIsClassDialogOpen(false);
+
+    try {
+      const url = editingClass 
+        ? `${API_URL}/classes/${editingClass.id}/` 
+        : `${API_URL}/classes/`;
+      const method = editingClass ? "PATCH" : "POST";
+      
+      const payload = {
+        name: classForm.name,
+        faculty: classForm.faculty,
+        cohort: classForm.cohort,
+        advisor: classForm.advisorId && classForm.advisorId !== "none" ? parseInt(classForm.advisorId) : null
+      };
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        toast.success(editingClass ? "Đã cập nhật lớp học thành công" : "Đã tạo lớp học mới thành công");
+        setIsClassDialogOpen(false);
+        fetchClasses();
+      } else {
+        toast.error("Không thể lưu lớp học");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
-  const handleDeleteClass = (id: string) => {
-    setClasses(classes.filter(c => c.id !== id));
-    toast.success("Đã xóa lớp học");
+  const handleDeleteClass = async (id: string) => {
+    try {
+      const res = await fetch(`${API_URL}/classes/${id}/`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        toast.success("Đã xóa lớp học");
+        fetchClasses();
+      } else {
+        toast.error("Không thể xóa lớp học");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
-  const handleRemoveStudentFromClass = (studentId: string) => {
-    setStudents(students.map(s => s.studentId === studentId ? { ...s, className: "" } : s));
-    toast.success("Đã xóa sinh viên khỏi lớp");
+  const handleRemoveStudentFromClass = async (studentId: string) => {
+    if (!selectedClass) return;
+    try {
+      const res = await fetch(`${API_URL}/classes/${selectedClass.id}/students/${studentId}/`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        toast.success("Đã xóa sinh viên khỏi lớp");
+        fetchStudents();
+      } else {
+        toast.error("Không thể xóa sinh viên khỏi lớp");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
-  const handleAddStudentToClass = () => {
+  const handleAddStudentToClass = async () => {
     if (!newStudentId || !selectedClass) {
       toast.error("Vui lòng chọn sinh viên");
       return;
     }
-    setStudents(students.map(s => s.studentId === newStudentId ? { ...s, className: selectedClass.name } : s));
-    toast.success("Đã thêm sinh viên vào lớp thành công");
-    setIsAddStudentOpen(false);
-    setNewStudentId("");
+    try {
+      const res = await fetch(`${API_URL}/classes/${selectedClass.id}/students/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: newStudentId })
+      });
+      if (res.ok) {
+        toast.success("Đã thêm sinh viên vào lớp thành công");
+        setIsAddStudentOpen(false);
+        setNewStudentId("");
+        fetchStudents();
+      } else {
+        toast.error("Không thể thêm sinh viên vào lớp");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
-  const handleQuickAssignAdvisor = (classId: string, advisorId: string) => {
-    setClasses(classes.map(c => c.id === classId ? { ...c, advisorId: advisorId || undefined } : c));
-    toast.success("Đã phân công cố vấn học tập");
+  const handleQuickAssignAdvisor = async (classId: string, advisorId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/classes/${classId}/assign-advisor/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ advisorId: advisorId && advisorId !== "unassigned" ? parseInt(advisorId) : null })
+      });
+      if (res.ok) {
+        toast.success("Đã phân công cố vấn học tập");
+        fetchClasses();
+      } else {
+        toast.error("Không thể phân công cố vấn");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
+
+  const handleAssignMonitor = async (studentId: string) => {
+    if (!selectedClass) return;
+    try {
+      const res = await fetch(`${API_URL}/classes/${selectedClass.id}/assign-monitor/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: studentId })
+      });
+      if (res.ok) {
+        toast.success(`Đã gán chức vụ Lớp trưởng cho sinh viên ${studentId}`);
+        fetchUsers();
+      } else {
+        toast.error("Không thể gán chức vụ Lớp trưởng");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
+  };
+
+
 
   return (
     <div className="space-y-6">
@@ -387,36 +538,65 @@ export default function Classes() {
                 <TableRow>
                   <TableHead>Mã SV</TableHead>
                   <TableHead>Họ và tên</TableHead>
+                  <TableHead>Vai trò</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Giới tính</TableHead>
-                  {canModifyStudentsInClass && <TableHead className="text-right">Thao tác</TableHead>}
+                  {(canModifyStudentsInClass || canAppointMonitor) && <TableHead className="text-right">Thao tác</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {classStudents.map(s => (
-                  <TableRow key={s.id}>
-                    <TableCell className="font-mono font-medium">{s.studentId}</TableCell>
-                    <TableCell>{s.fullName}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{s.email}</TableCell>
-                    <TableCell>{s.gender}</TableCell>
-                    {canModifyStudentsInClass && (
-                      <TableCell className="text-right">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="text-destructive hover:bg-destructive/10"
-                          onClick={() => handleRemoveStudentFromClass(s.studentId)}
-                          title="Xóa khỏi lớp"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                {classStudents.map(s => {
+                  const studentUserObj = allUsers.find(u => u.studentId === s.studentId);
+                  const isStudentMonitor = studentUserObj?.role === "class_monitor";
+                  return (
+                    <TableRow key={s.id}>
+                      <TableCell className="font-mono font-medium">{s.studentId}</TableCell>
+                      <TableCell>{s.fullName}</TableCell>
+                      <TableCell>
+                        {isStudentMonitor ? (
+                          <Badge className="bg-success/15 text-success hover:bg-success/20 border-0">
+                            Lớp trưởng
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">Sinh viên</span>
+                        )}
                       </TableCell>
-                    )}
-                  </TableRow>
-                ))}
+                      <TableCell className="text-muted-foreground text-sm">{s.email}</TableCell>
+                      <TableCell>{s.gender}</TableCell>
+                      {(canModifyStudentsInClass || canAppointMonitor) && (
+                        <TableCell className="text-right">
+                          <div className="flex justify-end items-center gap-1">
+                            {canAppointMonitor && !isStudentMonitor && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 gap-1 text-xs text-primary hover:text-primary-glow"
+                                onClick={() => handleAssignMonitor(s.studentId)}
+                                title="Bổ nhiệm làm lớp trưởng"
+                              >
+                                <UserCheck className="h-3.5 w-3.5" /> Gán lớp trưởng
+                              </Button>
+                            )}
+                            {canModifyStudentsInClass && (
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                onClick={() => handleRemoveStudentFromClass(s.studentId)}
+                                title="Xóa khỏi lớp"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
                 {classStudents.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={canModifyStudentsInClass ? 5 : 4} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={canModifyStudentsInClass || canAppointMonitor ? 6 : 5} className="text-center py-8 text-muted-foreground">
                       Chưa có sinh viên nào trong lớp này
                     </TableCell>
                   </TableRow>

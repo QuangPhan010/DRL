@@ -1,48 +1,72 @@
 import { useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
-import { GraduationCap, ShieldCheck, Users, BookOpen, Loader2, CalendarDays, UserCheck, Building2, Library } from "lucide-react";
+import { Loader2, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-
-const roleCards = [
-  { role: "student", label: "Sinh viên", user: "student", pass: "student123", icon: Users, color: "from-violet-500 to-fuchsia-500" },
-  { role: "organizer", label: "Đơn vị tổ chức", user: "organizer", pass: "organizer123", icon: CalendarDays, color: "from-emerald-500 to-teal-500" },
-  { role: "class_monitor", label: "Ban cán sự lớp", user: "monitor", pass: "monitor123", icon: UserCheck, color: "from-amber-500 to-orange-500" },
-  { role: "advisor", label: "Cố vấn học tập", user: "advisor", pass: "advisor123", icon: BookOpen, color: "from-accent to-cyan-400" },
-  { role: "student_affairs", label: "Phòng CTSV", user: "affairs", pass: "affairs123", icon: Building2, color: "from-blue-500 to-indigo-500" },
-  { role: "academic_affairs", label: "Phòng Đào tạo", user: "academic", pass: "academic123", icon: Library, color: "from-pink-500 to-rose-500" },
-  { role: "admin", label: "Quản trị hệ thống", user: "admin", pass: "admin123", icon: ShieldCheck, color: "from-primary to-primary-glow" },
-];
+import { User } from "@/lib/mock-data";
 
 export default function Login() {
-  const { user, login } = useAuth();
+  const { user, login, updateUserPassword } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  // Password reset dialog state for first time login
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [tempUser, setTempUser] = useState<User | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
   if (user) return <Navigate to="/" replace />;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      const u = login(username, password);
-      setLoading(false);
-      if (u) {
-        toast.success(`Chào mừng, ${u.fullName}`);
-        navigate("/");
-      } else {
-        toast.error("Tên đăng nhập hoặc mật khẩu không đúng");
-      }
-    }, 500);
+    const res = await login(username, password);
+    setLoading(false);
+    
+    if (res.isInactive) {
+      toast.error("Tài khoản của bạn đã bị khóa bởi Quản trị viên.");
+      return;
+    }
+
+    if (res.isFirstLogin && res.user) {
+      setTempUser(res.user);
+      setShowResetDialog(true);
+      toast.warning("Đây là lần đầu đăng nhập. Vui lòng đổi mật khẩu mới!");
+      return;
+    }
+
+    if (res.user) {
+      toast.success(`Chào mừng, ${res.user.fullName}`);
+      navigate("/");
+    } else {
+      toast.error("Mã số đăng nhập hoặc mật khẩu không đúng");
+    }
   };
 
-  const quickFill = (u: string, p: string) => { setUsername(u); setPassword(p); };
+  const handleResetPasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 6) {
+      toast.error("Mật khẩu mới phải từ 6 ký tự trở lên");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Mật khẩu xác nhận không trùng khớp");
+      return;
+    }
+    if (tempUser) {
+      updateUserPassword(tempUser.username, newPassword);
+      toast.success("Đổi mật khẩu thành công! Hệ thống đang tự động đăng nhập...");
+      setShowResetDialog(false);
+      navigate("/");
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-background">
@@ -94,13 +118,13 @@ export default function Login() {
 
           <div>
             <h2 className="font-display text-3xl font-bold">Đăng nhập</h2>
-            <p className="text-muted-foreground mt-2">Chào mừng trở lại! Vui lòng đăng nhập tài khoản của bạn.</p>
+            <p className="text-muted-foreground mt-2">Chào mừng trở lại! Đăng nhập bằng mã số của bạn.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="username">Tên đăng nhập</Label>
-              <Input id="username" value={username} onChange={e => setUsername(e.target.value)} placeholder="student / organizer / monitor / advisor / affairs / academic / admin" required className="h-11" />
+              <Label htmlFor="username">Mã số đăng nhập / Tên đăng nhập</Label>
+              <Input id="username" value={username} onChange={e => setUsername(e.target.value)} placeholder="Ví dụ: SV001, advisor, admin..." required className="h-11" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Mật khẩu</Label>
@@ -110,27 +134,35 @@ export default function Login() {
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Đăng nhập"}
             </Button>
           </form>
-
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-border" />
-              <span className="text-xs text-muted-foreground">Đăng nhập nhanh (demo)</span>
-              <div className="flex-1 h-px bg-border" />
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {roleCards.map(r => (
-                <Card key={r.role} onClick={() => quickFill(r.user, r.pass)} className="p-3 cursor-pointer hover:shadow-md transition-all hover:-translate-y-0.5 border border-border/80 hover:border-primary/40 bg-card/60">
-                  <div className={`h-9 w-9 rounded-lg bg-gradient-to-br ${r.color} flex items-center justify-center mb-2 shadow-sm`}>
-                    <r.icon className="h-4 w-4 text-white" />
-                  </div>
-                  <p className="text-xs font-semibold">{r.label}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{r.user}</p>
-                </Card>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
+
+      {/* Dialog: Force Reset Password on First Login */}
+      <Dialog open={showResetDialog} onOpenChange={(o) => { if (!o) setShowResetDialog(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-warning" /> Thay đổi mật khẩu lần đầu
+            </DialogTitle>
+            <DialogDescription>
+              Đây là lần đầu bạn đăng nhập hệ thống. Để bảo mật thông tin, bạn vui lòng thay đổi mật khẩu của mình trước khi tiếp tục.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleResetPasswordSubmit} className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Mật khẩu mới *</Label>
+              <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="Nhập mật khẩu mới..." />
+            </div>
+            <div className="space-y-2">
+              <Label>Xác nhận mật khẩu mới *</Label>
+              <Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required placeholder="Xác nhận lại mật khẩu..." />
+            </div>
+            <DialogFooter className="pt-2">
+              <Button type="submit" className="bg-gradient-primary w-full">Cập nhật mật khẩu mới</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
