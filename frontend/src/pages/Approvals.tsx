@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { FileCheck, CheckCircle2, XCircle, Eye, Clock, Lock, FileDown, ShieldAlert } from "lucide-react";
+import { useState, useEffect } from "react";
+import { FileCheck, CheckCircle2, XCircle, Eye, Clock, Lock, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,19 +9,56 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { mockEvaluations, mockStudents, mockCriteria, Evaluation, classificationColor } from "@/lib/mock-data";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, API_URL } from "@/contexts/AuthContext";
+import { classificationColor } from "@/lib/mock-data";
 import { toast } from "sonner";
 
 export default function Approvals() {
   const { user } = useAuth();
-  const [evals, setEvals] = useState(mockEvaluations);
-  const [viewing, setViewing] = useState<Evaluation | null>(null);
+  const [evals, setEvals] = useState<any[]>([]);
+  const [criteria, setCriteria] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [viewing, setViewing] = useState<any | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [locked, setLocked] = useState(false);
 
-  const isAdvisor = user?.role === "advisor";
-  const isAffairs = user?.role === "student_affairs" || user?.role === "admin";
+  const userRoles = user?.roles || (user?.role ? [user.role] : []);
+  const isAdvisor = userRoles.includes("advisor");
+  const isAffairs = userRoles.includes("student_affairs") || userRoles.includes("admin");
+
+  const fetchEvalsAndCriteria = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      // 1. Fetch Criteria
+      const criteriaRes = await fetch(`${API_URL}/criteria/`, { headers });
+      if (criteriaRes.ok) {
+        const criteriaData = await criteriaRes.json();
+        setCriteria(criteriaData);
+      }
+
+      // 2. Fetch Evaluations
+      const evalRes = await fetch(`${API_URL}/evaluations/`, { headers });
+      if (evalRes.ok) {
+        const evalData = await evalRes.json();
+        setEvals(evalData);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi khi tải dữ liệu xét duyệt");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchEvalsAndCriteria();
+  }, [user]);
 
   const pending = evals.filter(e => {
     if (isAdvisor) return e.status === "advisor_pending";
@@ -31,15 +68,36 @@ export default function Approvals() {
   const approved = evals.filter(e => e.status === "approved");
   const rejected = evals.filter(e => e.status === "rejected");
 
-  const decide = (id: string, status: "approved" | "rejected" | "pending") => {
-    setEvals(evals.map(e => e.id === id ? { ...e, status, reviewNote } : e));
-    setViewing(null); setReviewNote("");
-    if (status === "pending") {
-      toast.success("Đã phê duyệt cấp lớp & gửi lên Phòng Công tác Sinh viên");
-    } else if (status === "approved") {
-      toast.success("Đã phê duyệt hoàn tất phiếu rèn luyện của sinh viên");
-    } else {
-      toast.success("Đã từ chối / yêu cầu bổ sung minh chứng");
+  const decide = async (id: number, statusParam: "approved" | "rejected" | "pending") => {
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_URL}/evaluations/${id}/approve/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ status: statusParam, reviewNote })
+      });
+
+      if (res.ok) {
+        if (statusParam === "pending") {
+          toast.success("Đã phê duyệt cấp lớp & gửi lên Phòng Công tác Sinh viên");
+        } else if (statusParam === "approved") {
+          toast.success("Đã phê duyệt hoàn tất phiếu rèn luyện của sinh viên");
+        } else {
+          toast.success("Đã từ chối / yêu cầu bổ sung minh chứng");
+        }
+        fetchEvalsAndCriteria();
+        setViewing(null);
+        setReviewNote("");
+      } else {
+        toast.error("Không thể cập nhật kết quả duyệt");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối");
     }
   };
 
@@ -52,7 +110,7 @@ export default function Approvals() {
     toast.success("Đã xuất báo cáo chính thức (PDF/Excel) thành công!");
   };
 
-  const renderTable = (items: Evaluation[]) => (
+  const renderTable = (items: any[]) => (
     <Card className="border-0 shadow-md">
       <CardContent className="p-0 overflow-x-auto">
         <Table>
@@ -69,27 +127,26 @@ export default function Approvals() {
           </TableHeader>
           <TableBody>
             {items.map(e => {
-              const s = mockStudents.find(x => x.studentId === e.studentId);
               return (
                 <TableRow key={e.id} className="hover:bg-muted/30">
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="h-8 w-8 rounded-full bg-gradient-primary text-white flex items-center justify-center text-xs font-semibold">
-                        {s?.fullName.split(" ").slice(-1)[0][0]}
+                        {e.student_name.split(" ").slice(-1)[0][0]}
                       </div>
                       <div>
-                        <p className="font-medium">{s?.fullName}</p>
-                        <p className="text-xs text-muted-foreground">{e.studentId}</p>
+                        <p className="font-medium">{e.student_name}</p>
+                        <p className="text-xs text-muted-foreground">{e.student_id}</p>
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="hidden md:table-cell"><Badge variant="secondary">{s?.className}</Badge></TableCell>
+                  <TableCell className="hidden md:table-cell"><Badge variant="secondary">{e.class_name}</Badge></TableCell>
                   <TableCell className="text-sm">{e.semester} {e.year}</TableCell>
-                  <TableCell><span className="font-display font-bold">{e.totalScore}</span></TableCell>
+                  <TableCell><span className="font-display font-bold">{e.total_score}</span></TableCell>
                   <TableCell className="hidden md:table-cell"><Badge variant="outline" className={classificationColor(e.classification)}>{e.classification}</Badge></TableCell>
-                  <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">{e.submittedAt}</TableCell>
+                  <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">{e.submitted_at?.substring(0, 10)}</TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" className="gap-1" onClick={() => { setViewing(e); setReviewNote(e.reviewNote ?? ""); }}>
+                    <Button variant="ghost" size="sm" className="gap-1" onClick={() => { setViewing(e); setReviewNote(e.review_note ?? ""); }}>
                       <Eye className="h-4 w-4" /> Xem
                     </Button>
                   </TableCell>
@@ -109,7 +166,14 @@ export default function Approvals() {
     { label: "Đã từ chối / Bổ sung", value: rejected.length, icon: XCircle, color: "from-destructive to-red-400" },
   ];
 
-  const viewingStudent = viewing && mockStudents.find(s => s.studentId === viewing.studentId);
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-2">
+        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+        <p className="text-sm text-muted-foreground font-medium">Đang tải dữ liệu xét duyệt...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -165,32 +229,32 @@ export default function Approvals() {
       <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto">
           <DialogHeader><DialogTitle className="font-display">Chi tiết phiếu đánh giá</DialogTitle></DialogHeader>
-          {viewing && viewingStudent && (
+          {viewing && (
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-gradient-card border flex items-center gap-4">
                 <div className="h-12 w-12 rounded-full bg-gradient-primary flex items-center justify-center text-white font-bold">
-                  {viewingStudent.fullName.split(" ").slice(-1)[0][0]}
+                  {viewing.student_name.split(" ").slice(-1)[0][0]}
                 </div>
                 <div className="flex-1">
-                  <p className="font-semibold">{viewingStudent.fullName}</p>
-                  <p className="text-sm text-muted-foreground">{viewing.studentId} • {viewingStudent.className} • {viewing.semester} {viewing.year}</p>
+                  <p className="font-semibold">{viewing.student_name}</p>
+                  <p className="text-sm text-muted-foreground">{viewing.student_id} • {viewing.class_name} • {viewing.semester} {viewing.year}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-display text-3xl font-bold">{viewing.totalScore}</p>
+                  <p className="font-display text-3xl font-bold">{viewing.total_score}</p>
                   <Badge variant="outline" className={classificationColor(viewing.classification)}>{viewing.classification}</Badge>
                 </div>
               </div>
 
               <div className="space-y-3">
-                {mockCriteria.map(c => {
+                {criteria.map(c => {
                   const sc = viewing.scores[c.id] || 0;
                   return (
                     <div key={c.id}>
                       <div className="flex justify-between text-sm mb-1.5">
                         <span><span className="text-primary font-bold">{c.code}.</span> {c.name}</span>
-                        <span className="font-semibold">{sc}/{c.maxScore}</span>
+                        <span className="font-semibold">{sc}/{c.max_score}</span>
                       </div>
-                      <Progress value={(sc / c.maxScore) * 100} />
+                      <Progress value={(sc / c.max_score) * 100} />
                     </div>
                   );
                 })}
@@ -200,31 +264,35 @@ export default function Approvals() {
                 <div className="p-3 rounded-lg bg-muted/40 text-sm"><span className="font-medium">Ghi chú sinh viên: </span>{viewing.note}</div>
               )}
 
-              {viewing.status !== "approved" && viewing.status !== "rejected" && (
-                <div className="space-y-2"><Label>Nhận xét / Yêu cầu bổ sung</Label>
-                  <Textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Nhập lý do nếu từ chối hoặc cần bổ sung minh chứng..." rows={3} />
+              {viewing.review_note && (
+                <div className="p-3 rounded-lg bg-yellow-50 text-yellow-700 border border-yellow-200 text-sm">
+                  <span className="font-medium">Nhận xét duyệt trước: </span>{viewing.review_note}
                 </div>
               )}
+
+              <div className="space-y-2">
+                <Label htmlFor="reviewNote">Nhận xét đánh giá / Lý do phản hồi</Label>
+                <Textarea id="reviewNote" value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Nhập lý do từ chối, yêu cầu sửa đổi hoặc phản hồi..." />
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setViewing(null)}>Quay lại</Button>
+                
+                {isAdvisor && viewing.status === "advisor_pending" && (
+                  <>
+                    <Button variant="destructive" onClick={() => decide(viewing.id, "rejected")}>Từ chối</Button>
+                    <Button className="bg-success hover:bg-success/90" onClick={() => decide(viewing.id, "pending")}>Duyệt & Gửi Trường</Button>
+                  </>
+                )}
+
+                {isAffairs && viewing.status === "pending" && (
+                  <>
+                    <Button variant="destructive" onClick={() => decide(viewing.id, "rejected")}>Từ chối</Button>
+                    <Button className="bg-success hover:bg-success/90" onClick={() => decide(viewing.id, "approved")}>Phê duyệt hoàn tất</Button>
+                  </>
+                )}
+              </DialogFooter>
             </div>
-          )}
-          {viewing && viewing.status !== "approved" && viewing.status !== "rejected" && (
-            <DialogFooter className="gap-2">
-              <Button variant="outline" className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => decide(viewing.id, "rejected")}>
-                <XCircle className="h-4 w-4" />Yêu cầu bổ sung
-              </Button>
-
-              {isAdvisor && (
-                <Button className="gap-2 bg-primary hover:bg-primary/90" onClick={() => decide(viewing.id, "pending")}>
-                  <CheckCircle2 className="h-4 w-4" />Duyệt gửi lên trường
-                </Button>
-              )}
-
-              {isAffairs && (
-                <Button className="gap-2 bg-success hover:bg-success/90" onClick={() => decide(viewing.id, "approved")}>
-                  <CheckCircle2 className="h-4 w-4" />Phê duyệt cuối cùng
-                </Button>
-              )}
-            </DialogFooter>
           )}
         </DialogContent>
       </Dialog>

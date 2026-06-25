@@ -1,7 +1,8 @@
+import { useState, useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ClipboardList, FileCheck, Settings, GraduationCap, User as UserIcon, Sparkles,
-  CalendarDays, ClipboardCheck, RefreshCw, ShieldAlert,
+  CalendarDays, ClipboardCheck, RefreshCw, ShieldAlert, Award, Clock
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -33,6 +34,30 @@ export function AppSidebar() {
   const { pathname } = useLocation();
   const { user } = useAuth();
 
+  const [time, setTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const currentTime = time.toLocaleTimeString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  const currentDate = time.toLocaleDateString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    weekday: "long",
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+  });
+
   const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const items = navItems
     .filter(i => user && i.roles.some(r => userRoles.includes(r)))
@@ -43,7 +68,6 @@ export function AppSidebar() {
       return i;
     });
   const isActive = (url: string) => url === "/" ? pathname === "/" : pathname.startsWith(url);
-
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -81,6 +105,20 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      {!collapsed ? (
+        <div className="mt-auto p-4 border-t border-sidebar-border bg-sidebar-accent/5">
+          <div className="flex flex-col gap-1 items-center justify-center text-center">
+            <span className="text-[9px] uppercase font-extrabold tracking-wider text-primary/70 bg-primary/10 px-2 py-0.5 rounded-full">Hệ thống (UTC+7)</span>
+            <span className="font-mono text-base font-bold text-sidebar-foreground/90 mt-1">{currentTime}</span>
+            <span className="text-[10px] text-sidebar-foreground/50">{currentDate}</span>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-auto p-3 border-t border-sidebar-border flex justify-center text-sidebar-foreground/40" title={`Hệ thống (UTC+7): ${currentTime}`}>
+          <Clock className="h-4 w-4" />
+        </div>
+      )}
     </Sidebar>
   );
 }

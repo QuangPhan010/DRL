@@ -14,6 +14,7 @@ import MyScores from "./pages/MyScores";
 import Criteria from "./pages/Criteria";
 import SettingsPage from "./pages/Settings";
 import Activities from "./pages/Activities";
+import ActivityDetail from "./pages/ActivityDetail";
 import ClassReview from "./pages/ClassReview";
 import DataSync from "./pages/DataSync";
 import Classes from "./pages/Classes";
@@ -41,6 +42,7 @@ const App = () => (
               <Route path="/criteria" element={<Criteria />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/activities" element={<Activities />} />
+              <Route path="/activities/:id" element={<ActivityDetail />} />
               <Route path="/class-review" element={<ClassReview />} />
               <Route path="/data-sync" element={<DataSync />} />
               <Route path="/fraud-monitor" element={<FraudDashboard />} />

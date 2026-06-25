@@ -4,7 +4,8 @@ from .views import (
     login_view, change_password_view, ClassInfoViewSet, StudentViewSet, 
     CriterionViewSet, EvaluationViewSet, ActivityViewSet, UserViewSet,
     OrganizationViewSet, UserOrganizationViewSet, ClassPositionViewSet, StudentClassPositionViewSet,
-    FraudDetectionViewSet, AuditLogViewSet, ChangeRequestViewSet
+    FraudDetectionViewSet, AuditLogViewSet, ChangeRequestViewSet,
+    ExternalActivityViewSet, EvidenceFileViewSet, EvidenceReviewViewSet, FraudFlagViewSet
 )
 
 router = DefaultRouter()
@@ -21,10 +22,15 @@ router.register(r'student-class-positions', StudentClassPositionViewSet, basenam
 router.register(r'fraud-detections', FraudDetectionViewSet, basename='fraud-detection')
 router.register(r'audit-logs', AuditLogViewSet, basename='audit-log')
 router.register(r'change-requests', ChangeRequestViewSet, basename='change-request')
+router.register(r'external-activities', ExternalActivityViewSet, basename='external-activity')
+router.register(r'evidence-files', EvidenceFileViewSet, basename='evidence-file')
+router.register(r'evidence-reviews', EvidenceReviewViewSet, basename='evidence-review')
+router.register(r'fraud-flags', FraudFlagViewSet, basename='fraud-flag')
 
 urlpatterns = [
     path('login/', login_view, name='login'),
     path('change-password/', change_password_view, name='change-password'),
     path('', include(router.urls)),
 ]
+
 

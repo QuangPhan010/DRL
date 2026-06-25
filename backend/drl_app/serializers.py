@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import User, ClassInfo, Student, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest
+from django.utils import timezone
+from .models import User, ClassInfo, Student, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag
 
 class ClassPositionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -120,10 +121,20 @@ class ActivityParticipantSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.full_name', read_only=True)
     student_id = serializers.CharField(source='student.student_id', read_only=True)
     class_name = serializers.CharField(source='student.class_info.name', read_only=True)
+    checked_in_time = serializers.SerializerMethodField()
+    checked_out_time = serializers.SerializerMethodField()
 
     class Meta:
         model = ActivityParticipant
-        fields = ('id', 'student', 'student_id', 'student_name', 'class_name', 'status', 'evidence_url')
+        fields = ('id', 'student', 'student_id', 'student_name', 'class_name', 'status', 'evidence_url', 'checked_in_time', 'checked_out_time')
+
+    def get_checked_in_time(self, obj):
+        checkin = obj.activity.checkins.filter(student=obj.student).order_by('-check_in_time').first()
+        return timezone.localtime(checkin.check_in_time).isoformat() if checkin else None
+
+    def get_checked_out_time(self, obj):
+        checkout = obj.activity.checkouts.filter(student=obj.student).order_by('-check_out_time').first()
+        return timezone.localtime(checkout.check_out_time).isoformat() if checkout else None
 
 class ActivitySerializer(serializers.ModelSerializer):
     participants = ActivityParticipantSerializer(many=True, read_only=True)
@@ -140,7 +151,7 @@ class ActivitySerializer(serializers.ModelSerializer):
             if hasattr(request.user, 'student_profile') and request.user.student_profile:
                 checkin = obj.checkins.filter(student=request.user.student_profile).order_by('-check_in_time').first()
                 if checkin:
-                    return checkin.check_in_time.isoformat()
+                    return timezone.localtime(checkin.check_in_time).isoformat()
         return None
 
     def get_selfie_resubmit_requested(self, obj):
@@ -199,4 +210,37 @@ class ChangeRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChangeRequest
         fields = '__all__'
+
+
+class EvidenceFileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EvidenceFile
+        fields = '__all__'
+
+
+class EvidenceReviewSerializer(serializers.ModelSerializer):
+    reviewer_name = serializers.CharField(source='reviewer.full_name', read_only=True)
+
+    class Meta:
+        model = EvidenceReview
+        fields = '__all__'
+
+
+class FraudFlagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FraudFlag
+        fields = '__all__'
+
+
+class ExternalActivitySerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.full_name', read_only=True)
+    student_id_str = serializers.CharField(source='student.student_id', read_only=True)
+    evidence_files = EvidenceFileSerializer(many=True, read_only=True)
+    fraud_flags = FraudFlagSerializer(many=True, read_only=True)
+    reviews = EvidenceReviewSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ExternalActivity
+        fields = '__all__'
+
 

@@ -8,12 +8,13 @@ from django.contrib.auth import authenticate
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import User, ClassInfo, Student, Criterion, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest
+from .models import User, ClassInfo, Student, Criterion, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag
 from .serializers import (
     UserSerializer, ClassInfoSerializer, StudentSerializer, CriterionSerializer, 
     EvaluationSerializer, ActivitySerializer, ActivityParticipantSerializer,
     OrganizationSerializer, UserOrganizationSerializer, ClassPositionSerializer, StudentClassPositionSerializer,
-    ActivityCheckInSerializer, ActivityCheckOutSerializer, ActivityAttendanceSerializer, FraudDetectionSerializer, AuditLogSerializer, ChangeRequestSerializer
+    ActivityCheckInSerializer, ActivityCheckOutSerializer, ActivityAttendanceSerializer, FraudDetectionSerializer, AuditLogSerializer, ChangeRequestSerializer,
+    ExternalActivitySerializer, EvidenceFileSerializer, EvidenceReviewSerializer, FraudFlagSerializer
 )
 
 # 1. Login View
@@ -208,6 +209,15 @@ class StudentViewSet(viewsets.ModelViewSet):
         queryset = Student.objects.all()
         if user.is_authenticated and user.role == 'advisor':
             queryset = queryset.filter(class_info__advisor=user)
+            
+        student_id = self.request.query_params.get('student_id') or self.request.query_params.get('studentId')
+        if student_id:
+            queryset = queryset.filter(student_id=student_id)
+            
+        class_name = self.request.query_params.get('class_name') or self.request.query_params.get('className')
+        if class_name:
+            queryset = queryset.filter(class_info__name=class_name)
+            
         return queryset
 
     @action(detail=False, methods=['post'], url_path='import-excel')
@@ -653,6 +663,25 @@ class ActivityViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Tài khoản không phải là sinh viên hoặc không có hồ sơ sinh viên'}, status=status.HTTP_400_BAD_REQUEST)
         student = request.user.student_profile
         
+        # Check check-in timing (UTC+7 / Asia/Ho_Chi_Minh)
+        import datetime
+        import pytz
+        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        now = timezone.now()
+        
+        if activity.start_time and activity.date:
+            naive_start = datetime.datetime.combine(activity.date, activity.start_time)
+            start_dt = tz.localize(naive_start)
+            checkin_start = start_dt - datetime.timedelta(minutes=10)
+            if now < checkin_start:
+                return Response({'error': 'Hoạt động chưa mở check-in. Vui lòng quay lại trước giờ diễn ra 10 phút.'}, status=status.HTTP_400_BAD_REQUEST)
+                
+        if activity.end_time and activity.date:
+            naive_end = datetime.datetime.combine(activity.date, activity.end_time)
+            end_dt = tz.localize(naive_end)
+            if now > end_dt:
+                return Response({'error': 'Hoạt động đã kết thúc, không thể check-in.'}, status=status.HTTP_400_BAD_REQUEST)
+
         lat = float(request.data.get('latitude', 0.0))
         lon = float(request.data.get('longitude', 0.0))
         selfie_id = request.data.get('selfieFileId') or request.data.get('selfie_file_id', '')
@@ -771,21 +800,27 @@ class ActivityViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Tài khoản không phải là sinh viên hoặc không có hồ sơ sinh viên'}, status=status.HTTP_400_BAD_REQUEST)
         student = request.user.student_profile
 
-        act_duration = int(activity.duration_minutes) if activity.duration_minutes is not None else 180
-
-        # Validate that check-in occurred and that we are in the last 10 minutes
+        # Validate that check-in occurred
         checkin_obj = ActivityCheckIn.objects.filter(activity=activity, student=student).order_by('-check_in_time').first()
         if not checkin_obj:
             return Response({'error': 'Bạn chưa thực hiện check-in cho hoạt động này.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        elapsed_delta = timezone.now() - checkin_obj.check_in_time
-        elapsed_mins = int(elapsed_delta.total_seconds() / 60)
-        remaining_mins = act_duration - elapsed_mins
+        # Check check-out timing (UTC+7 / Asia/Ho_Chi_Minh)
+        import datetime
+        import pytz
+        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        now = timezone.now()
 
-        if remaining_mins > 10:
-            return Response({
-                'error': f'Chưa thể check-out. Hoạt động có thời lượng {act_duration} phút. Bạn chỉ có thể check-out khi còn dưới 10 phút (Hiện tại còn {remaining_mins} phút nữa).'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        if activity.end_time and activity.date:
+            naive_end = datetime.datetime.combine(activity.date, activity.end_time)
+            end_dt = tz.localize(naive_end)
+            checkout_start = end_dt - datetime.timedelta(minutes=10)
+            if now < checkout_start:
+                remaining_seconds = int((checkout_start - now).total_seconds())
+                remaining_mins = max(1, int(remaining_seconds / 60))
+                return Response({
+                    'error': f'Chưa thể check-out. Bạn chỉ có thể check-out trước khi kết thúc 10 phút (Còn khoảng {remaining_mins} phút nữa).'
+                }, status=status.HTTP_400_BAD_REQUEST)
         
         lat = float(request.data.get('latitude', 0.0))
         lon = float(request.data.get('longitude', 0.0))
@@ -1044,6 +1079,299 @@ class ChangeRequestViewSet(viewsets.ModelViewSet):
     queryset = ChangeRequest.objects.all()
     serializer_class = ChangeRequestSerializer
     permission_classes = [permissions.AllowAny]
+
+
+class ExternalActivityViewSet(viewsets.ModelViewSet):
+    serializer_class = ExternalActivitySerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = ExternalActivity.objects.all().prefetch_related('evidence_files', 'fraud_flags', 'reviews')
+        
+        # Filtering by Student
+        if user.is_authenticated and user.role == 'student':
+            if hasattr(user, 'student_profile'):
+                queryset = queryset.filter(student=user.student_profile)
+            else:
+                queryset = queryset.none()
+        
+        # Filtering by Advisor
+        elif user.is_authenticated and user.role == 'advisor':
+            queryset = queryset.filter(student__class_info__advisor=user)
+
+        # Query parameter filters
+        student_id = self.request.query_params.get('studentId')
+        if student_id:
+            queryset = queryset.filter(student__student_id=student_id)
+
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.is_authenticated and hasattr(user, 'student_profile'):
+            serializer.save(student=user.student_profile)
+        else:
+            # For testing/mocking when user might not have a student profile
+            first_student = Student.objects.first()
+            serializer.save(student=first_student)
+
+    @action(detail=True, methods=['post'], url_path='submit')
+    def submit_activity(self, request, pk=None):
+        activity = self.get_object()
+        if activity.status not in ['draft', 'need_more_info']:
+            return Response({'error': 'Hoạt động phải ở trạng thái Draft hoặc Cần bổ sung mới được nộp.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Clear existing fraud flags for this activity
+        activity.fraud_flags.all().delete()
+
+        # Run Anti-fraud Rules Check
+        evidence_files = activity.evidence_files.all()
+        student = activity.student
+
+        # Rule 1, 2, 3: Evidence File Hash Checks
+        for ev in evidence_files:
+            # Rule 1: Duplicate hash (any match in system)
+            dup_any = EvidenceFile.objects.filter(file_hash=ev.file_hash).exclude(activity=activity)
+            if dup_any.exists():
+                FraudFlag.objects.create(
+                    activity=activity,
+                    rule_code='RULE_1',
+                    severity='High',
+                    description=f"Minh chứng '{ev.file_name}' trùng hash SHA256 với minh chứng khác trong hệ thống."
+                )
+
+                # Rule 2: One evidence used by multiple students
+                dup_other_student = dup_any.exclude(activity__student=student)
+                if dup_other_student.exists():
+                    other_sv_ids = list(dup_other_student.values_list('activity__student__student_id', flat=True))
+                    other_sv_ids_str = ", ".join(other_sv_ids)
+                    FraudFlag.objects.create(
+                        activity=activity,
+                        rule_code='RULE_2',
+                        severity='Critical',
+                        description=f"Minh chứng '{ev.file_name}' được sử dụng bởi sinh viên khác (Mã SV: {other_sv_ids_str})."
+                    )
+
+                # Rule 3: Reused evidence (same student, different activities)
+                dup_same_student = dup_any.filter(activity__student=student)
+                if dup_same_student.exists():
+                    other_act_names = list(dup_same_student.values_list('activity__activity_name', flat=True))
+                    other_act_names_str = ", ".join(other_act_names)
+                    FraudFlag.objects.create(
+                        activity=activity,
+                        rule_code='RULE_3',
+                        severity='High',
+                        description=f"Minh chứng '{ev.file_name}' bị nộp lại nhiều lần cho các hoạt động khác của bạn (Hoạt động: {other_act_names_str})."
+                    )
+
+        # Rule 4: Activity outside semester range
+        # Typical semester break is July (7) and August (8)
+        if activity.start_date.month in [7, 8] or activity.end_date.month in [7, 8]:
+            FraudFlag.objects.create(
+                activity=activity,
+                rule_code='RULE_4',
+                severity='Medium',
+                description=f"Thời gian hoạt động ({activity.start_date} - {activity.end_date}) diễn ra ngoài khoảng thời gian học kỳ chính."
+            )
+
+        # Rule 5: Proposed score exceeds rules (> 10 points)
+        if activity.proposed_score > 10:
+            FraudFlag.objects.create(
+                activity=activity,
+                rule_code='RULE_5',
+                severity='High',
+                description=f"Số điểm đề xuất ({activity.proposed_score} điểm) vượt quá mức quy định cho hoạt động ngoài trường (tối đa 10 điểm)."
+            )
+
+        # Rule 6: Gained points for same activity name before
+        gained_before = ExternalActivity.objects.filter(
+            student=student,
+            activity_name__iexact=activity.activity_name,
+            status='approved'
+        ).exclude(id=activity.id)
+        if gained_before.exists():
+            FraudFlag.objects.create(
+                activity=activity,
+                rule_code='RULE_6',
+                severity='Critical',
+                description=f"Sinh viên đã được cộng điểm cho hoạt động có cùng tên '{activity.activity_name}' trước đó."
+            )
+
+        # Rule 7: Organizer name in suspicious watchlist
+        suspicious_keywords = ["tự phát", "không rõ", "cá nhân", "nhóm sinh viên", "nhóm tự phát", "scam", "chưa xác minh", "unknown"]
+        org_name_lower = activity.organizer_name.lower()
+        if any(kw in org_name_lower for kw in suspicious_keywords):
+            FraudFlag.objects.create(
+                activity=activity,
+                rule_code='RULE_7',
+                severity='Medium',
+                description=f"Đơn vị tổ chức '{activity.organizer_name}' nằm trong danh sách cần xác minh hoặc có tên không rõ ràng."
+            )
+
+        # Update status
+        activity.status = 'submitted'
+        activity.save()
+
+        # Audit logging
+        AuditLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="Nộp hồ sơ hoạt động ngoài trường",
+            entity_name="ExternalActivity",
+            entity_id=activity.id,
+            before_value="draft",
+            after_value="submitted",
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+
+        return Response(ExternalActivitySerializer(activity).data)
+
+    @action(detail=True, methods=['post'], url_path='review-advisor')
+    def review_advisor(self, request, pk=None):
+        activity = self.get_object()
+        reviewer = request.user if request.user.is_authenticated else None
+        
+        status_input = request.data.get('status') # 'advisor_approved', 'need_more_info', 'rejected_by_advisor'
+        comment = request.data.get('comment', '')
+
+        if status_input not in ['advisor_approved', 'need_more_info', 'rejected_by_advisor']:
+            return Response({'error': 'Trạng thái xét duyệt của Cố vấn không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_status = activity.status
+        activity.status = status_input
+        activity.save()
+
+        # Create review entry
+        EvidenceReview.objects.create(
+            activity=activity,
+            reviewer=reviewer,
+            review_level='advisor',
+            status=status_input,
+            comment=comment
+        )
+
+        # Audit logging
+        AuditLog.objects.create(
+            user=reviewer,
+            action="Cố vấn học tập xét duyệt hoạt động",
+            entity_name="ExternalActivity",
+            entity_id=activity.id,
+            before_value=old_status,
+            after_value=status_input,
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+
+        return Response(ExternalActivitySerializer(activity).data)
+
+    @action(detail=True, methods=['post'], url_path='review-ctsv')
+    def review_ctsv(self, request, pk=None):
+        activity = self.get_object()
+        reviewer = request.user if request.user.is_authenticated else None
+        
+        status_input = request.data.get('status') # 'approved', 'rejected'
+        comment = request.data.get('comment', '')
+
+        if status_input not in ['approved', 'rejected']:
+            return Response({'error': 'Trạng thái xét duyệt của CTSV không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_status = activity.status
+        activity.status = status_input
+        activity.save()
+
+        # Create review entry
+        EvidenceReview.objects.create(
+            activity=activity,
+            reviewer=reviewer,
+            review_level='ctsv',
+            status=status_input,
+            comment=comment
+        )
+
+        # Audit logging
+        AuditLog.objects.create(
+            user=reviewer,
+            action="Phòng CTSV phê duyệt cuối hoạt động ngoài trường",
+            entity_name="ExternalActivity",
+            entity_id=activity.id,
+            before_value=old_status,
+            after_value=status_input,
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+
+        return Response(ExternalActivitySerializer(activity).data)
+
+    @action(detail=False, methods=['post'], url_path='random-audit')
+    def random_audit(self, request):
+        # CTSV requests random audit of approved activities (usually 5% to 10%)
+        import random
+        percent = int(request.data.get('percent', 10))
+        if percent < 5 or percent > 15:
+            percent = 10 # Default to 10%
+
+        approved_activities = list(ExternalActivity.objects.filter(status='approved'))
+        total_count = len(approved_activities)
+        if total_count == 0:
+            return Response({'message': 'Không có hồ sơ đã duyệt nào để hậu kiểm.', 'audited_ids': []})
+
+        audit_count = max(1, int(total_count * (percent / 100.0)))
+        audited_samples = random.sample(approved_activities, audit_count)
+
+        audited_ids = []
+        for act in audited_samples:
+            audited_ids.append(act.id)
+            # Log the post-audit action
+            AuditLog.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                action="Hậu kiểm ngẫu nhiên hồ sơ hoạt động ngoài trường",
+                entity_name="ExternalActivity",
+                entity_id=act.id,
+                before_value="approved",
+                after_value="approved_audited",
+                ip_address=request.META.get('REMOTE_ADDR')
+            )
+
+        return Response({
+            'message': f'Đã chọn ngẫu nhiên {audit_count} hồ sơ ({percent}%) trên tổng số {total_count} hồ sơ đã duyệt để tiến hành hậu kiểm.',
+            'audited_activities': ExternalActivitySerializer(audited_samples, many=True).data
+        })
+
+
+class EvidenceFileViewSet(viewsets.ModelViewSet):
+    queryset = EvidenceFile.objects.all()
+    serializer_class = EvidenceFileSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def perform_create(self, serializer):
+        # Calculate SHA256 file hash if not provided
+        import hashlib
+        file_obj = self.request.FILES.get('file')
+        file_hash = self.request.data.get('file_hash')
+
+        if file_obj and not file_hash:
+            sha256 = hashlib.sha256()
+            for chunk in file_obj.chunks():
+                sha256.update(chunk)
+            file_hash = sha256.hexdigest()
+            serializer.save(file_hash=file_hash, file_size=file_obj.size)
+        else:
+            serializer.save()
+
+
+class EvidenceReviewViewSet(viewsets.ModelViewSet):
+    queryset = EvidenceReview.objects.all()
+    serializer_class = EvidenceReviewSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class FraudFlagViewSet(viewsets.ModelViewSet):
+    queryset = FraudFlag.objects.all()
+    serializer_class = FraudFlagSerializer
+    permission_classes = [permissions.AllowAny]
+
 
 
 

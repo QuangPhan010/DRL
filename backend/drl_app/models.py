@@ -316,3 +316,73 @@ class ChangeRequest(models.Model):
     class Meta:
         db_table = 'change_request'
 
+
+class ExternalActivity(models.Model):
+    STATUS_CHOICES = (
+        ('draft', 'Draft'),
+        ('submitted', 'Submitted'),
+        ('advisor_approved', 'Advisor Approved'),
+        ('need_more_info', 'Need More Information'),
+        ('rejected_by_advisor', 'Rejected By Advisor'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    )
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='external_activities')
+    activity_name = models.CharField(max_length=255)
+    organizer_name = models.CharField(max_length=255)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    location = models.CharField(max_length=255, blank=True, null=True)
+    activity_type = models.CharField(max_length=100, blank=True, null=True)
+    participation_content = models.TextField(blank=True, null=True)
+    proposed_score = models.IntegerField(default=0)
+    description = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='draft')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'external_activity'
+
+    def __str__(self):
+        return f"{self.activity_name} - {self.student.full_name}"
+
+
+class EvidenceFile(models.Model):
+    activity = models.ForeignKey(ExternalActivity, on_delete=models.CASCADE, related_name='evidence_files')
+    file_name = models.CharField(max_length=255)
+    file_hash = models.CharField(max_length=64) # SHA256
+    file_size = models.IntegerField() # bytes
+    file_url = models.TextField(blank=True, null=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'evidence_file'
+
+    def __str__(self):
+        return self.file_name
+
+
+class EvidenceReview(models.Model):
+    activity = models.ForeignKey(ExternalActivity, on_delete=models.CASCADE, related_name='reviews')
+    reviewer = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    review_level = models.CharField(max_length=50) # 'advisor' or 'ctsv'
+    status = models.CharField(max_length=50) # e.g. Approved, Rejected, Need More Information
+    comment = models.TextField(blank=True, null=True)
+    reviewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'evidence_review'
+
+
+class FraudFlag(models.Model):
+    activity = models.ForeignKey(ExternalActivity, on_delete=models.CASCADE, related_name='fraud_flags')
+    rule_code = models.CharField(max_length=50) # RULE_1 to RULE_7
+    severity = models.CharField(max_length=20) # Low, Medium, High, Critical
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'fraud_flag'
+
+

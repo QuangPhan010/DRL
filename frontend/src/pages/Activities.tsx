@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, MapPin } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, MapPin, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -12,13 +13,35 @@ import { Textarea } from "@/components/ui/textarea";
 import { mockActivities, mockCriteria, Activity, mockStudents } from "@/lib/mock-data";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import ExternalActivities from "./ExternalActivities";
 
 export default function Activities() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [criteria, setCriteria] = useState<any[]>(mockCriteria);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const handleOpenCreateChange = (open: boolean) => {
+    setIsCreateOpen(open);
+    if (!open) {
+      setTitle("");
+      setDescription("");
+      setPoints("5");
+      setCriterionId("c1");
+      setDate("2026-06-30");
+      setStartTime("08:00");
+      setEndTime("11:00");
+      setIsEditing(false);
+      setEditActivityId(null);
+      setScope("internal");
+      setOrganizerName("");
+      setLocation("");
+      setEndDate("2026-06-30");
+      setActivityType("Hoạt động xã hội");
+    }
+  };
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [evidenceUrl, setEvidenceUrl] = useState("");
@@ -91,27 +114,34 @@ export default function Activities() {
     const now = new Date();
     const elapsedMins = Math.floor((now.getTime() - checkIn.getTime()) / (1000 * 60));
     const remainingMins = duration - elapsedMins;
-    
+
     if (remainingMins <= 10) {
       return { enabled: true, text: `Check-out GPS (${remainingMins > 0 ? remainingMins : 0}p)`, remaining: remainingMins };
     }
-    return { 
-      enabled: false, 
-      text: `Check-out khóa (còn ${remainingMins}p)`, 
-      remaining: remainingMins 
+    return {
+      enabled: false,
+      text: `Check-out khóa (còn ${remainingMins}p)`,
+      remaining: remainingMins
     };
   };
 
   // Form states for creating activity
+  const [scope, setScope] = useState<"internal" | "external">("internal");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("5");
-  const [criterionId, setCriterionId] = useState("c3");
+  const [criterionId, setCriterionId] = useState("c1");
   const [date, setDate] = useState("2026-06-30");
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("11:00");
   const [isEditing, setIsEditing] = useState(false);
   const [editActivityId, setEditActivityId] = useState<string | null>(null);
+
+  // Off-campus fields
+  const [organizerName, setOrganizerName] = useState("");
+  const [location, setLocation] = useState("");
+  const [endDate, setEndDate] = useState("2026-06-30");
+  const [activityType, setActivityType] = useState("Hoạt động xã hội");
 
   const fetchActivities = async () => {
     try {
@@ -156,7 +186,7 @@ export default function Activities() {
 
   useEffect(() => {
     fetchActivities();
-    
+
     // Fetch criteria if any
     const fetchCriteria = async () => {
       try {
@@ -164,13 +194,17 @@ export default function Activities() {
         if (res.ok) {
           const data = await res.json();
           if (data && data.length > 0) {
-            setCriteria(data.map((c: any) => ({
+            const mapped = data.map((c: any) => ({
               id: `c${c.id}`,
               code: c.code,
               name: c.name,
               maxScore: Number(c.max_score),
               description: c.description
-            })));
+            }));
+            setCriteria(mapped);
+            if (mapped.length > 0) {
+              setCriterionId(mapped[0].id);
+            }
           }
         }
       } catch (err) {
@@ -192,42 +226,76 @@ export default function Activities() {
         return diffMins;
       };
 
-      const url = isEditing 
-        ? `${API_URL}/activities/${editActivityId}/` 
-        : `${API_URL}/activities/`;
-      const method = isEditing ? "PUT" : "POST";
+      let res;
+      if (scope === "internal") {
+        const url = isEditing
+          ? `${API_URL}/activities/${editActivityId}/`
+          : `${API_URL}/activities/`;
+        const method = isEditing ? "PUT" : "POST";
+        res = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            description,
+            points: Number(points),
+            criterion: Number(criterionId.replace(/\D/g, "")) || 3,
+            date,
+            organizer: user?.fullName || "Đơn vị Tổ chức",
+            status: "upcoming",
+            latitude: 10.850100,
+            longitude: 106.771200,
+            radius_meters: 100,
+            duration_minutes: calculateDuration(startTime, endTime),
+            start_time: startTime ? `${startTime}:00` : null,
+            end_time: endTime ? `${endTime}:00` : null
+          })
+        });
+      } else {
+        const url = isEditing
+          ? `${API_URL}/external-activities/${editActivityId}/`
+          : `${API_URL}/external-activities/`;
+        const method = isEditing ? "PUT" : "POST";
+        const token = localStorage.getItem("drl_token");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        res = await fetch(url, {
+          method,
+          headers,
+          body: JSON.stringify({
+            activity_name: title,
+            organizer_name: organizerName,
+            start_date: date,
+            end_date: endDate,
+            location,
+            activity_type: activityType,
+            proposed_score: Number(points),
+            description,
+            status: "draft"
+          })
+        });
+      }
 
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          description,
-          points: Number(points),
-          criterion: Number(criterionId.replace(/\D/g, "")) || 3,
-          date,
-          organizer: user?.fullName || "Đơn vị Tổ chức",
-          status: "upcoming",
-          latitude: 10.850100,
-          longitude: 106.771200,
-          radius_meters: 100,
-          duration_minutes: calculateDuration(startTime, endTime),
-          start_time: startTime ? `${startTime}:00` : null,
-          end_time: endTime ? `${endTime}:00` : null
-        })
-      });
       if (res.ok) {
-        toast.success(isEditing ? "Đã cập nhật hoạt động thành công!" : "Đã tạo hoạt động mới thành công!");
+        toast.success(isEditing ? "Đã cập nhật hoạt động thành công!" : "Đã tạo hoạt động thành công!");
         fetchActivities();
+        window.dispatchEvent(new Event("refresh-external-activities"));
         setIsCreateOpen(false);
-        setTitle(""); 
-        setDescription(""); 
-        setPoints("5"); 
-        setCriterionId("c3");
+        setTitle("");
+        setDescription("");
+        setPoints("5");
+        setCriterionId("c1");
         setStartTime("08:00");
         setEndTime("11:00");
         setIsEditing(false);
         setEditActivityId(null);
+        setScope("internal");
+        setOrganizerName("");
+        setLocation("");
+        setEndDate("2026-06-30");
+        setActivityType("Hoạt động xã hội");
       } else {
         const errData = await res.json();
         console.error("Lỗi từ backend:", errData);
@@ -384,7 +452,7 @@ export default function Activities() {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
-      
+
       const res = await fetch(`${API_URL}/activities/${selectedActivity.id}/check-in/`, {
         method: "POST",
         headers,
@@ -463,19 +531,19 @@ export default function Activities() {
         </div>
 
         {!userRoles.includes("student") && (
-          <Button 
+          <Button
             onClick={() => {
               setIsEditing(false);
               setEditActivityId(null);
               setTitle("");
               setDescription("");
               setPoints("5");
-              setCriterionId("c3");
+              setCriterionId("c1");
               setDate("2026-06-30");
               setStartTime("08:00");
               setEndTime("11:00");
               setIsCreateOpen(true);
-            }} 
+            }}
             className="bg-gradient-primary gap-2"
           >
             <Plus className="h-4 w-4" />Tạo hoạt động
@@ -483,112 +551,129 @@ export default function Activities() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {activities.map(act => {
-          const isRegistered = act.participants.some(p => p.studentId === user?.studentId);
-          const studentStatus = act.participants.find(p => p.studentId === user?.studentId)?.status;
-          const criterion = criteria.find(c => c.id === act.criterionId);
+      <Tabs defaultValue="internal" className="w-full">
+        <TabsList className="grid w-full max-w-[400px] grid-cols-2">
+          <TabsTrigger value="internal">Hoạt động trong trường</TabsTrigger>
+          <TabsTrigger value="external">Hoạt động ngoài trường</TabsTrigger>
+        </TabsList>
 
-          return (
-            <Card key={act.id} className="border-0 shadow-md bg-gradient-card flex flex-col justify-between">
-              <CardHeader>
-                <div className="flex justify-between items-start gap-2">
-                  <Badge className="bg-primary/10 text-primary border-primary/20">{criterion?.name || "Tiêu chí"}</Badge>
-                  <Badge variant={act.status === "completed" ? "secondary" : "default"} className={act.status === "completed" ? "bg-success/15 text-success hover:bg-success/20 border-0" : "bg-warning/15 text-warning hover:bg-warning/20 border-0 text-black dark:text-white"}>
-                    {act.status === "completed" ? "Đã hoàn thành" : "Sắp diễn ra"}
-                  </Badge>
-                </div>
-                <CardTitle className="font-display text-lg font-bold mt-3 leading-snug line-clamp-2">{act.title}</CardTitle>
-                <CardDescription className="line-clamp-3 text-sm mt-1">{act.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 pt-0">
-                <div className="flex justify-between items-center text-xs border-t pt-3">
-                  <div>
-                    <span className="text-muted-foreground block">Thời gian diễn ra</span>
-                    <span className="font-medium">
-                      {act.date} {act.start_time && `(${act.start_time.substring(0, 5)} - ${act.end_time?.substring(0, 5)})`}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-muted-foreground block">Điểm đề xuất</span>
-                    <span className="font-bold text-primary text-sm">+{act.points} điểm</span>
-                  </div>
-                </div>
+        <TabsContent value="internal" className="space-y-6 mt-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {activities.map(act => {
+              const isRegistered = act.participants.some(p => p.studentId === user?.studentId);
+              const studentStatus = act.participants.find(p => p.studentId === user?.studentId)?.status;
+              const criterion = criteria.find(c => c.id === act.criterionId);
 
-                <div className="border-t pt-3 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Users className="h-3.5 w-3.5" />
-                    <span>{act.participants.length} người đăng ký</span>
-                  </div>
+              return (
+                <Card key={act.id} className="border-0 shadow-md bg-gradient-card flex flex-col justify-between">
+                  <CardHeader>
+                    <div className="flex justify-between items-start gap-2">
+                      <Badge className="bg-primary/10 text-primary border-primary/20">{criterion?.name || "Tiêu chí"}</Badge>
+                      <Badge variant={act.status === "completed" ? "secondary" : "default"} className={act.status === "completed" ? "bg-success/15 text-success hover:bg-success/20 border-0" : "bg-warning/15 text-warning hover:bg-warning/20 border-0 text-black dark:text-white"}>
+                        {act.status === "completed" ? "Đã hoàn thành" : "Sắp diễn ra"}
+                      </Badge>
+                    </div>
+                    <CardTitle className="font-display text-lg font-bold mt-3 leading-snug line-clamp-2 cursor-pointer hover:text-primary transition-colors flex items-center justify-between gap-1.5" onClick={() => navigate(`/activities/${act.id}`)}>
+                      <span>{act.title}</span>
+                      <Eye className="h-4 w-4 opacity-50 shrink-0 hover:opacity-100" />
+                    </CardTitle>
+                    <CardDescription className="line-clamp-3 text-sm mt-1">{act.description}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4 pt-0">
+                    <div className="flex justify-between items-center text-xs border-t pt-3">
+                      <div>
+                        <span className="text-muted-foreground block">Thời gian diễn ra</span>
+                        <span className="font-medium">
+                          {act.date} {act.start_time && `(${act.start_time.substring(0, 5)} - ${act.end_time?.substring(0, 5)})`}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-muted-foreground block">Điểm đề xuất</span>
+                        <span className="font-bold text-primary text-sm">+{act.points} điểm</span>
+                      </div>
+                    </div>
 
-                  {userRoles.includes("student") && (
-                    <div className="flex flex-wrap gap-2">
-                      {!isRegistered && act.status === "upcoming" && (
-                        <Button size="sm" onClick={() => registerActivity(act.id)}>Đăng ký</Button>
-                      )}
-                      {isRegistered && studentStatus === "registered" && (
-                        <div className="flex gap-1.5">
-                          <Button 
-                            size="xs" 
-                            onClick={() => openCheckInSim(act)} 
-                            disabled={!!act.check_in_time && !act.selfie_resubmit_requested}
-                            className="bg-success hover:bg-success/90 text-white text-xs h-8 px-2.5 disabled:opacity-60"
-                          >
-                            <MapPin className="h-3.5 w-3.5" /> {act.selfie_resubmit_requested ? "Bổ sung Selfie" : (act.check_in_time ? "Đã Check-in" : "Check-in GPS")}
-                          </Button>
-                          <Button 
-                            size="xs" 
-                            onClick={() => openCheckOutSim(act)} 
-                            disabled={!getCheckoutStatus(act).enabled}
-                            className="bg-warning hover:bg-warning/90 text-black dark:text-white text-xs h-8 px-2.5 disabled:opacity-60"
-                          >
-                            <MapPin className="h-3.5 w-3.5" /> {getCheckoutStatus(act).text}
-                          </Button>
+                    <div className="border-t pt-3 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Users className="h-3.5 w-3.5" />
+                        <span>{act.participants.length} người đăng ký</span>
+                      </div>
+
+                      {userRoles.includes("student") && (
+                        <div className="flex flex-wrap gap-2">
+                          {!isRegistered && act.status === "upcoming" && (
+                            <Button size="sm" onClick={() => registerActivity(act.id)}>Đăng ký</Button>
+                          )}
+                          {isRegistered && studentStatus === "registered" && (
+                            <div className="flex gap-1.5">
+                              <Button
+                                size="xs"
+                                onClick={() => openCheckInSim(act)}
+                                disabled={!!act.check_in_time && !act.selfie_resubmit_requested}
+                                className="bg-success hover:bg-success/90 text-white text-xs h-8 px-2.5 disabled:opacity-60"
+                              >
+                                <MapPin className="h-3.5 w-3.5" /> {act.selfie_resubmit_requested ? "Bổ sung Selfie" : (act.check_in_time ? "Đã Check-in" : "Check-in GPS")}
+                              </Button>
+                              <Button
+                                size="xs"
+                                onClick={() => openCheckOutSim(act)}
+                                disabled={!getCheckoutStatus(act).enabled}
+                                className="bg-warning hover:bg-warning/90 text-black dark:text-white text-xs h-8 px-2.5 disabled:opacity-60"
+                              >
+                                <MapPin className="h-3.5 w-3.5" /> {getCheckoutStatus(act).text}
+                              </Button>
+                            </div>
+                          )}
+                          {studentStatus === "attended" && (
+                            <Badge variant="outline" className="bg-success/5 text-success">Đã tham gia</Badge>
+                          )}
+                          {studentStatus === "evidence_submitted" && (
+                            <Badge variant="outline" className="bg-warning/5 text-warning">Đã nộp minh chứng</Badge>
+                          )}
+                          {act.status === "completed" && studentStatus !== "attended" && studentStatus !== "evidence_submitted" && (
+                            <Button size="sm" variant="outline" className="gap-1 border-primary/30 text-primary" onClick={() => { setSelectedActivity(act); setIsEvidenceOpen(true); }}>
+                              <Upload className="h-3 w-3" /> Nộp minh chứng
+                            </Button>
+                          )}
                         </div>
                       )}
-                      {studentStatus === "attended" && (
-                        <Badge variant="outline" className="bg-success/5 text-success">Đã tham gia</Badge>
-                      )}
-                      {studentStatus === "evidence_submitted" && (
-                        <Badge variant="outline" className="bg-warning/5 text-warning">Đã nộp minh chứng</Badge>
-                      )}
-                      {act.status === "completed" && studentStatus !== "attended" && studentStatus !== "evidence_submitted" && (
-                        <Button size="sm" variant="outline" className="gap-1 border-primary/30 text-primary" onClick={() => { setSelectedActivity(act); setIsEvidenceOpen(true); }}>
-                          <Upload className="h-3 w-3" /> Nộp minh chứng
-                        </Button>
-                      )}
-                    </div>
-                  )}
 
-                  {!userRoles.includes("student") && (
-                    <div className="flex flex-wrap gap-2 w-full justify-between items-center mt-2">
-                      <div className="flex gap-1.5">
-                        <Button size="xs" variant="outline" className="gap-1 border-primary/20 text-primary h-8 px-2" onClick={() => { setSelectedActivity(act); setIsQrOpen(true); }}>
-                          <QrCode className="h-3.5 w-3.5" /> Mã QR
-                        </Button>
-                        <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
-                          Danh sách ({act.participants.length})
-                        </Button>
-                      </div>
-                      <div className="flex gap-1.5">
-                        <Button size="xs" variant="outline" className="h-8 px-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => openEditActivity(act)}>
-                          Sửa
-                        </Button>
-                        <Button size="xs" variant="outline" className="h-8 px-2 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleDeleteActivity(act.id)}>
-                          Xóa
-                        </Button>
-                      </div>
+                      {!userRoles.includes("student") && (
+                        <div className="flex flex-wrap gap-2 w-full justify-between items-center mt-2">
+                          <div className="flex gap-1.5">
+                            <Button size="xs" variant="outline" className="gap-1 border-primary/20 text-primary h-8 px-2" onClick={() => { setSelectedActivity(act); setIsQrOpen(true); }}>
+                              <QrCode className="h-3.5 w-3.5" /> Mã QR
+                            </Button>
+                            <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
+                              Danh sách ({act.participants.length})
+                            </Button>
+                          </div>
+                          <div className="flex gap-1.5">
+                            <Button size="xs" variant="outline" className="h-8 px-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => openEditActivity(act)}>
+                              Sửa
+                            </Button>
+                            <Button size="xs" variant="outline" className="h-8 px-2 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleDeleteActivity(act.id)}>
+                              Xóa
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="external" className="mt-6">
+          <ExternalActivities />
+        </TabsContent>
+      </Tabs>
+
 
       {/* Dialog: Create Activity */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+      <Dialog open={isCreateOpen} onOpenChange={handleOpenCreateChange}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="font-display">
@@ -597,42 +682,117 @@ export default function Activities() {
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
             <div className="space-y-2">
+              <Label>Phạm vi hoạt động</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={scope === "internal" ? "default" : "outline"}
+                  onClick={() => !isEditing && setScope("internal")}
+                  className={scope === "internal" ? "bg-gradient-primary text-white font-medium shadow-sm" : ""}
+                  disabled={isEditing}
+                >
+                  Trong trường
+                </Button>
+                <Button
+                  type="button"
+                  variant={scope === "external" ? "default" : "outline"}
+                  onClick={() => !isEditing && setScope("external")}
+                  className={scope === "external" ? "bg-gradient-primary text-white font-medium shadow-sm" : ""}
+                  disabled={isEditing}
+                >
+                  Ngoài trường
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="title">Tên hoạt động</Label>
               <Input id="title" value={title} onChange={e => setTitle(e.target.value)} required placeholder="Ví dụ: Hội thao khoa CNTT..." />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">Mô tả hoạt động</Label>
-              <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Mô tả nội dung, thời gian và địa điểm..." />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="points">Điểm rèn luyện</Label>
-                <Input id="points" type="number" value={points} onChange={e => setPoints(e.target.value)} required min="1" max="25" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="criterion">Tiêu chí áp dụng</Label>
-                <Select value={criterionId} onValueChange={setCriterionId}>
-                  <SelectTrigger id="criterion"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {criteria.map(c => <SelectItem key={c.id} value={c.id}>{c.code}. {c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2 col-span-1">
-                <Label htmlFor="date">Ngày tổ chức</Label>
-                <Input id="date" type="date" value={date} onChange={e => setDate(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="startTime">Giờ bắt đầu</Label>
-                <Input id="startTime" type="time" value={startTime} onChange={e => setStartTime(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="endTime">Giờ kết thúc</Label>
-                <Input id="endTime" type="time" value={endTime} onChange={e => setEndTime(e.target.value)} required />
-              </div>
-            </div>
+
+            {scope === "internal" ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Mô tả hoạt động</Label>
+                  <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Mô tả nội dung, thời gian và địa điểm..." />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="points">Điểm rèn luyện</Label>
+                    <Input id="points" type="number" value={points} onChange={e => setPoints(e.target.value)} required min="1" max="25" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="criterion">Tiêu chí áp dụng</Label>
+                    <Select value={criterionId} onValueChange={setCriterionId}>
+                      <SelectTrigger id="criterion"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {criteria.map(c => <SelectItem key={c.id} value={c.id}>{c.code}. {c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2 col-span-1">
+                    <Label htmlFor="date">Ngày tổ chức</Label>
+                    <Input id="date" type="date" value={date} onChange={e => setDate(e.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="startTime">Giờ bắt đầu</Label>
+                    <Input id="startTime" type="time" value={startTime} onChange={e => setStartTime(e.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="endTime">Giờ kết thúc</Label>
+                    <Input id="endTime" type="time" value={endTime} onChange={e => setEndTime(e.target.value)} required />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="orgName">Đơn vị tổ chức</Label>
+                    <Input id="orgName" value={organizerName} onChange={e => setOrganizerName(e.target.value)} required placeholder="Ví dụ: Quận đoàn 9..." />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="location">Địa điểm diễn ra</Label>
+                    <Input id="location" value={location} onChange={e => setLocation(e.target.value)} required placeholder="Ví dụ: Quận 9, TPHCM..." />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="points">Điểm đề xuất</Label>
+                    <Input id="points" type="number" value={points} onChange={e => setPoints(e.target.value)} required min="1" max="30" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="activityType">Loại hoạt động ngoài trường</Label>
+                    <Select value={activityType} onValueChange={setActivityType}>
+                      <SelectTrigger id="activityType"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Hoạt động xã hội">Hoạt động xã hội</SelectItem>
+                        <SelectItem value="Cuộc thi khoa học">Cuộc thi khoa học</SelectItem>
+                        <SelectItem value="Hoạt động thể thao">Hoạt động thể thao</SelectItem>
+                        <SelectItem value="Kỹ năng mềm">Kỹ năng mềm</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="startDate">Ngày bắt đầu</Label>
+                    <Input id="startDate" type="date" value={date} onChange={e => setDate(e.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="endDate">Ngày kết thúc</Label>
+                    <Input id="endDate" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} required />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Mô tả / Ghi chú</Label>
+                  <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Mô tả chi tiết nội dung tham gia..." />
+                </div>
+              </>
+            )}
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>Hủy</Button>
               <Button type="submit" className="bg-gradient-primary">
@@ -747,9 +907,9 @@ export default function Activities() {
           {selectedActivity && (
             <div className="py-6 flex flex-col items-center gap-4">
               <div className="border p-3 rounded-2xl bg-white shadow-inner">
-                <img 
+                <img
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(JSON.stringify({ activityId: Number(selectedActivity.id), token: "ACT_" + selectedActivity.id }))}`}
-                  alt="QR Code" 
+                  alt="QR Code"
                   className="h-44 w-44 object-contain"
                 />
               </div>
@@ -775,17 +935,17 @@ export default function Activities() {
             <DialogDescription>Xác thực vị trí GPS và ảnh chụp Selfie thực tế của bạn để hoàn tất điểm danh vào hoạt động.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCheckInSim} className="space-y-4">
-            
-            <Button 
-              type="button" 
-              variant="outline" 
-              size="sm" 
-              onClick={getRealLocation} 
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={getRealLocation}
               className="w-full gap-2 border-primary text-primary h-9 text-xs"
             >
               <MapPin className="h-3.5 w-3.5" /> Sử dụng Vị trí Thực tế của thiết bị
             </Button>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="simLat">Kinh độ (Latitude)</Label>
@@ -799,14 +959,14 @@ export default function Activities() {
 
             <div className="space-y-2">
               <Label htmlFor="simSelfie">Ảnh chụp Selfie minh chứng (Chụp ảnh hoặc từ Album) *</Label>
-              <Input 
-                id="simSelfie" 
-                type="file" 
-                accept="image/*" 
+              <Input
+                id="simSelfie"
+                type="file"
+                accept="image/*"
                 onChange={e => {
                   const file = e.target.files?.[0];
                   setSimSelfie(file ? file.name : "");
-                }} 
+                }}
               />
             </div>
 
@@ -830,17 +990,17 @@ export default function Activities() {
             <DialogDescription>Xác thực vị trí GPS và ảnh chụp Selfie của bạn để hoàn tất thời gian tham gia hoạt động.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCheckOutSim} className="space-y-4">
-            
-            <Button 
-              type="button" 
-              variant="outline" 
-              size="sm" 
-              onClick={getRealLocation} 
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={getRealLocation}
               className="w-full gap-2 border-primary text-primary h-9 text-xs"
             >
               <MapPin className="h-3.5 w-3.5" /> Sử dụng Vị trí Thực tế của thiết bị
             </Button>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="simLatOut">Kinh độ (Latitude)</Label>
@@ -854,14 +1014,14 @@ export default function Activities() {
 
             <div className="space-y-2">
               <Label htmlFor="simSelfieOut">Ảnh chụp Selfie xác nhận *</Label>
-              <Input 
-                id="simSelfieOut" 
-                type="file" 
-                accept="image/*" 
+              <Input
+                id="simSelfieOut"
+                type="file"
+                accept="image/*"
                 onChange={e => {
                   const file = e.target.files?.[0];
                   setSimSelfie(file ? file.name : "");
-                }} 
+                }}
               />
             </div>
 
