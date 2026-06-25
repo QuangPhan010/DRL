@@ -76,7 +76,8 @@ export default function Classes() {
           faculty: s.faculty,
           cohort: s.cohort,
           gender: s.gender,
-          phone: s.phone
+          phone: s.phone,
+          positions: s.positions || []
         }));
         setStudents(mapped);
       }
@@ -289,6 +290,7 @@ export default function Classes() {
       if (res.ok) {
         toast.success(`Đã gán chức vụ Lớp trưởng cho sinh viên ${studentId}`);
         fetchUsers();
+        fetchStudents();
       } else {
         toast.error("Không thể gán chức vụ Lớp trưởng");
       }
@@ -296,6 +298,45 @@ export default function Classes() {
       toast.error("Lỗi kết nối máy chủ");
     }
   };
+
+  const handleAssignPosition = async (studentId: string, positionName: string) => {
+    if (!selectedClass) return;
+    try {
+      const res = await fetch(`${API_URL}/classes/${selectedClass.id}/assign-position/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: studentId, position_name: positionName })
+      });
+      if (res.ok) {
+        toast.success(`Đã bổ nhiệm chức vụ ${positionName} thành công`);
+        await Promise.all([fetchStudents(), fetchUsers()]);
+      } else {
+        toast.error(`Không thể bổ nhiệm chức vụ ${positionName}`);
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
+  };
+
+  const handleRevokePosition = async (studentId: string, positionName: string) => {
+    if (!selectedClass) return;
+    try {
+      const res = await fetch(`${API_URL}/classes/${selectedClass.id}/revoke-position/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: studentId, position_name: positionName })
+      });
+      if (res.ok) {
+        toast.success(`Đã thu hồi chức vụ ${positionName}`);
+        await Promise.all([fetchStudents(), fetchUsers()]);
+      } else {
+        toast.error(`Không thể thu hồi chức vụ ${positionName}`);
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
+  };
+
 
 
 
@@ -553,29 +594,53 @@ export default function Classes() {
                       <TableCell className="font-mono font-medium">{s.studentId}</TableCell>
                       <TableCell>{s.fullName}</TableCell>
                       <TableCell>
-                        {isStudentMonitor ? (
-                          <Badge className="bg-success/15 text-success hover:bg-success/20 border-0">
-                            Lớp trưởng
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">Sinh viên</span>
-                        )}
+                        <div className="flex flex-wrap gap-1">
+                          {s.positions && s.positions.length > 0 ? (
+                            s.positions.map(p => (
+                              <Badge key={p.id} className="bg-success/15 text-success hover:bg-success/20 border-0 text-xs">
+                                {p.position_name}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className="text-muted-foreground text-sm">Sinh viên</span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">{s.email}</TableCell>
                       <TableCell>{s.gender}</TableCell>
                       {(canModifyStudentsInClass || canAppointMonitor) && (
                         <TableCell className="text-right">
-                          <div className="flex justify-end items-center gap-1">
-                            {canAppointMonitor && !isStudentMonitor && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 gap-1 text-xs text-primary hover:text-primary-glow"
-                                onClick={() => handleAssignMonitor(s.studentId)}
-                                title="Bổ nhiệm làm lớp trưởng"
+                          <div className="flex justify-end items-center gap-2">
+                            {canAppointMonitor && (
+                              <Select
+                                value={s.positions && s.positions.length > 0 ? s.positions[0].position_name : "none"}
+                                onValueChange={async (newVal) => {
+                                  if (newVal === "none") {
+                                    if (s.positions) {
+                                      for (const pos of s.positions) {
+                                        await handleRevokePosition(s.studentId, pos.position_name);
+                                      }
+                                    }
+                                  } else {
+                                    if (s.positions) {
+                                      for (const pos of s.positions) {
+                                        await handleRevokePosition(s.studentId, pos.position_name);
+                                      }
+                                    }
+                                    await handleAssignPosition(s.studentId, newVal);
+                                  }
+                                }}
                               >
-                                <UserCheck className="h-3.5 w-3.5" /> Gán lớp trưởng
-                              </Button>
+                                <SelectTrigger className="h-8 w-32 text-xs">
+                                  <SelectValue placeholder="Chọn chức vụ" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Sinh viên</SelectItem>
+                                  <SelectItem value="Lớp trưởng">Lớp trưởng</SelectItem>
+                                  <SelectItem value="Lớp phó">Lớp phó</SelectItem>
+                                  <SelectItem value="Bí thư">Bí thư</SelectItem>
+                                </SelectContent>
+                              </Select>
                             )}
                             {canModifyStudentsInClass && (
                               <Button 

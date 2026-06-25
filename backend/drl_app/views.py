@@ -1,3 +1,5 @@
+import math
+from django.utils import timezone
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -6,10 +8,12 @@ from django.contrib.auth import authenticate
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import User, ClassInfo, Student, Criterion, Evaluation, EvaluationDetail, Activity, ActivityParticipant
+from .models import User, ClassInfo, Student, Criterion, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest
 from .serializers import (
     UserSerializer, ClassInfoSerializer, StudentSerializer, CriterionSerializer, 
-    EvaluationSerializer, ActivitySerializer, ActivityParticipantSerializer
+    EvaluationSerializer, ActivitySerializer, ActivityParticipantSerializer,
+    OrganizationSerializer, UserOrganizationSerializer, ClassPositionSerializer, StudentClassPositionSerializer,
+    ActivityCheckInSerializer, ActivityCheckOutSerializer, ActivityAttendanceSerializer, FraudDetectionSerializer, AuditLogSerializer, ChangeRequestSerializer
 )
 
 # 1. Login View
@@ -106,14 +110,68 @@ class ClassInfoViewSet(viewsets.ModelViewSet):
         student_id = request.data.get('studentId') or request.data.get('student_id')
         student = get_object_or_404(Student, student_id=student_id, class_info=class_info)
         
-        # Demote previous monitor of this same class
-        class_students = Student.objects.filter(class_info=class_info)
-        User.objects.filter(student_id__in=class_students.values_list('student_id', flat=True), role='class_monitor').update(role='student')
+        # Demote previous monitor
+        position, _ = ClassPosition.objects.get_or_create(name='Lớp trưởng')
+        StudentClassPosition.objects.filter(class_info=class_info, position=position).delete()
         
-        # Promote new student user
+        # Assign new monitor
+        assigned_by = request.user if request.user.is_authenticated else None
+        StudentClassPosition.objects.create(student=student, class_info=class_info, position=position, assigned_by=assigned_by)
+        
+        # Backwards compatibility: update roles
         User.objects.filter(student_id=student_id).update(role='class_monitor')
         
         return Response({'message': f'Student {student_id} is now the class monitor'})
+
+    @action(detail=True, methods=['post'], url_path='assign-position')
+    def assign_position(self, request, pk=None):
+        class_info = self.get_object_value(pk)
+        student_id = request.data.get('studentId') or request.data.get('student_id')
+        position_name = request.data.get('positionName') or request.data.get('position_name')
+        
+        student = get_object_or_404(Student, student_id=student_id, class_info=class_info)
+        position, _ = ClassPosition.objects.get_or_create(name=position_name)
+        
+        assigned_by = request.user if request.user.is_authenticated else None
+        
+        # Unique positions per class
+        if position_name in ['Lớp trưởng', 'Lớp phó', 'Bí thư']:
+            StudentClassPosition.objects.filter(class_info=class_info, position=position).delete()
+            
+            # Backwards compatibility with the static role
+            if position_name == 'Lớp trưởng':
+                class_students = Student.objects.filter(class_info=class_info)
+                User.objects.filter(student_id__in=class_students.values_list('student_id', flat=True), role='class_monitor').update(role='student')
+                User.objects.filter(student_id=student_id).update(role='class_monitor')
+
+        StudentClassPosition.objects.update_or_create(
+            student=student,
+            class_info=class_info,
+            position=position,
+            defaults={'assigned_by': assigned_by}
+        )
+        
+        return Response({'message': f'Student {student_id} has been assigned position {position_name}'})
+
+    @action(detail=True, methods=['post'], url_path='revoke-position')
+    def revoke_position(self, request, pk=None):
+        class_info = self.get_object_value(pk)
+        student_id = request.data.get('studentId') or request.data.get('student_id')
+        position_name = request.data.get('positionName') or request.data.get('position_name')
+        
+        student = get_object_or_404(Student, student_id=student_id, class_info=class_info)
+        
+        StudentClassPosition.objects.filter(
+            student=student,
+            class_info=class_info,
+            position__name=position_name
+        ).delete()
+        
+        # If revoking Lớp trưởng, revert role to student for backwards compatibility
+        if position_name == 'Lớp trưởng':
+            User.objects.filter(student_id=student_id, role='class_monitor').update(role='student')
+            
+        return Response({'message': f'Revoked position {position_name} from student {student_id}'})
 
     def get_object_value(self, pk):
         return get_object_or_404(ClassInfo, pk=pk)
@@ -346,10 +404,65 @@ class StudentViewSet(viewsets.ModelViewSet):
         return response
 
 # 4. Criterion ViewSet
-class CriterionViewSet(viewsets.ReadOnlyModelViewSet):
+class CriterionViewSet(viewsets.ModelViewSet):
     queryset = Criterion.objects.all()
     serializer_class = CriterionSerializer
     permission_classes = [permissions.AllowAny]
+
+    def create(self, request, *args, **kwargs):
+        code = request.data.get('code')
+        name = request.data.get('name')
+        max_score = request.data.get('maxScore') or request.data.get('max_score', 0)
+        description = request.data.get('description', '')
+        groups_data = request.data.get('groups', [])
+
+        criterion = Criterion.objects.create(
+            code=code,
+            name=name,
+            max_score=max_score,
+            description=description
+        )
+
+        from .models import GroupCriterion, SubItem
+        for g in groups_data:
+            group = GroupCriterion.objects.create(
+                criterion=criterion,
+                name=g.get('name', '')
+            )
+            for s in g.get('subItems', []):
+                SubItem.objects.create(
+                    group=group,
+                    name=s.get('name', ''),
+                    max_score=s.get('maxScore') or s.get('max_score', 0)
+                )
+
+        return Response(CriterionSerializer(criterion).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, pk=None, *args, **kwargs):
+        criterion = self.get_object()
+        criterion.code = request.data.get('code', criterion.code)
+        criterion.name = request.data.get('name', criterion.name)
+        criterion.max_score = request.data.get('maxScore') or request.data.get('max_score', criterion.max_score)
+        criterion.description = request.data.get('description', criterion.description)
+        criterion.save()
+
+        groups_data = request.data.get('groups')
+        if groups_data is not None:
+            criterion.groups.all().delete()
+            from .models import GroupCriterion, SubItem
+            for g in groups_data:
+                group = GroupCriterion.objects.create(
+                    criterion=criterion,
+                    name=g.get('name', '')
+                )
+                for s in g.get('subItems', []):
+                    SubItem.objects.create(
+                        group=group,
+                        name=s.get('name', ''),
+                        max_score=s.get('maxScore') or s.get('max_score', 0)
+                    )
+
+        return Response(CriterionSerializer(criterion).data)
 
 # 5. Evaluation ViewSet
 class EvaluationViewSet(viewsets.ModelViewSet):
@@ -501,7 +614,261 @@ class ActivityViewSet(viewsets.ModelViewSet):
         participant = get_object_or_404(ActivityParticipant, activity=activity, student=student)
         participant.status = 'evidence_submitted'
         participant.evidence_url = evidence_url
+        participant.save()
+
+        # Fraud Rule 8 check: If modifying points/status after CTSV approval, log it
+        # (For this mock, we write an audit log entry)
+        AuditLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="Nộp minh chứng hoạt động",
+            entity_name="ActivityParticipant",
+            entity_id=participant.id,
+            before_value="registered",
+            after_value="evidence_submitted",
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
         return Response(ActivitySerializer(activity).data)
+
+    @action(detail=True, methods=['post'], url_path='confirm-attended')
+    def confirm_attended(self, request, pk=None):
+        activity = self.get_object()
+        student_id = request.data.get('studentId') or request.data.get('student_id')
+        student = get_object_or_404(Student, student_id=student_id)
+        participant = get_object_or_404(ActivityParticipant, activity=activity, student=student)
+        participant.status = 'attended'
+        participant.save()
+        return Response(ActivitySerializer(activity).data)
+
+    @action(detail=True, methods=['post'], url_path='approve-points')
+    def approve_points(self, request, pk=None):
+        activity = self.get_object()
+        activity.status = 'completed'
+        activity.save()
+        return Response(ActivitySerializer(activity).data)
+
+    @action(detail=True, methods=['post'], url_path='check-in', permission_classes=[permissions.IsAuthenticated])
+    def check_in(self, request, pk=None):
+        activity = self.get_object()
+        if not hasattr(request.user, 'student_profile') or not request.user.student_profile:
+            return Response({'error': 'Tài khoản không phải là sinh viên hoặc không có hồ sơ sinh viên'}, status=status.HTTP_400_BAD_REQUEST)
+        student = request.user.student_profile
+        
+        lat = float(request.data.get('latitude', 0.0))
+        lon = float(request.data.get('longitude', 0.0))
+        selfie_id = request.data.get('selfieFileId') or request.data.get('selfie_file_id', '')
+        device_id = request.data.get('deviceId') or request.data.get('device_id', 'unknown_device')
+        ip_addr = request.data.get('ipAddress') or request.data.get('ip_address') or request.META.get('REMOTE_ADDR', '127.0.0.1')
+
+        # Check if they are updating a missing selfie
+        existing_checkin = ActivityCheckIn.objects.filter(activity=activity, student=student).first()
+        if existing_checkin and selfie_id:
+            existing_checkin.selfie_file_id = selfie_id
+            existing_checkin.save()
+            
+            # If there was a RULE_4 fraud detection, delete it
+            RULE_4_fraud = FraudDetection.objects.filter(student=student, activity=activity, rule_code="RULE_4").first()
+            if RULE_4_fraud:
+                RULE_4_fraud.delete()
+                
+            # Write AuditLog
+            AuditLog.objects.create(
+                user=request.user,
+                action="Bổ sung ảnh selfie thành công",
+                entity_name="ActivityCheckIn",
+                entity_id=existing_checkin.id,
+                before_value="Thiếu ảnh selfie",
+                after_value=selfie_id,
+                ip_address=ip_addr
+            )
+            return Response({
+                'message': 'Bổ sung ảnh selfie thành công',
+                'gps_valid': True,
+                'distance_meters': 0.0,
+                'check_in': ActivityCheckInSerializer(existing_checkin).data
+            })
+
+        # 1. Haversine distance validation
+        def haversine(lat1, lon1, lat2, lon2):
+            dLat = (lat2 - lat1) * math.pi / 180.0
+            dLon = (lon2 - lon1) * math.pi / 180.0
+            lat1 = lat1 * math.pi / 180.0
+            lat2 = lat2 * math.pi / 180.0
+            a = (pow(math.sin(dLat / 2), 2) +
+                 pow(math.sin(dLon / 2), 2) *
+                 math.cos(lat1) * math.cos(lat2))
+            return 6371000 * 2 * math.asin(math.sqrt(a)) # meters
+
+        act_lat = float(activity.latitude) if activity.latitude is not None else 10.850100
+        act_lon = float(activity.longitude) if activity.longitude is not None else 106.771200
+        act_radius = int(activity.radius_meters) if activity.radius_meters is not None else 100
+
+        dist = haversine(act_lat, act_lon, lat, lon)
+        is_gps_invalid = dist > act_radius
+
+        if is_gps_invalid:
+            FraudDetection.objects.create(
+                student=student,
+                activity=activity,
+                rule_code="RULE_1",
+                severity="High",
+                description=f"Check-in ngoài bán kính GPS cho phép: {dist:.1f}m (Giới hạn {act_radius}m)"
+            )
+
+        # 2. Selfie validation
+        if not selfie_id:
+            FraudDetection.objects.create(
+                student=student,
+                activity=activity,
+                rule_code="RULE_4",
+                severity="Medium",
+                description="Check-in thiếu ảnh selfie minh chứng thực tế"
+            )
+
+        # 3. Shared device within 3 minutes check
+        three_minutes_ago = timezone.now() - timezone.timedelta(minutes=3)
+        shared_device_checkins = ActivityCheckIn.objects.filter(
+            activity=activity,
+            device_id=device_id,
+            check_in_time__gte=three_minutes_ago
+        ).exclude(student=student)
+
+        if shared_device_checkins.exists():
+            other_students = ", ".join([ci.student.student_id for ci in shared_device_checkins])
+            FraudDetection.objects.create(
+                student=student,
+                activity=activity,
+                rule_code="RULE_5",
+                severity="High",
+                description=f"Nhiều tài khoản check-in chung một thiết bị ({device_id}) trong thời gian ngắn: {other_students}"
+            )
+
+        # Save check-in
+        checkin_obj = ActivityCheckIn.objects.create(
+            activity=activity,
+            student=student,
+            latitude=lat,
+            longitude=lon,
+            selfie_file_id=selfie_id,
+            device_id=device_id,
+            ip_address=ip_addr
+        )
+
+        # Initialize/update Attendance record
+        attendance, _ = ActivityAttendance.objects.get_or_create(activity=activity, student=student)
+        attendance.save()
+
+        return Response({
+            'message': 'Check-in thành công',
+            'gps_valid': not is_gps_invalid,
+            'distance_meters': dist,
+            'check_in': ActivityCheckInSerializer(checkin_obj).data
+        })
+
+    @action(detail=True, methods=['post'], url_path='check-out', permission_classes=[permissions.IsAuthenticated])
+    def check_out(self, request, pk=None):
+        activity = self.get_object()
+        if not hasattr(request.user, 'student_profile') or not request.user.student_profile:
+            return Response({'error': 'Tài khoản không phải là sinh viên hoặc không có hồ sơ sinh viên'}, status=status.HTTP_400_BAD_REQUEST)
+        student = request.user.student_profile
+
+        act_duration = int(activity.duration_minutes) if activity.duration_minutes is not None else 180
+
+        # Validate that check-in occurred and that we are in the last 10 minutes
+        checkin_obj = ActivityCheckIn.objects.filter(activity=activity, student=student).order_by('-check_in_time').first()
+        if not checkin_obj:
+            return Response({'error': 'Bạn chưa thực hiện check-in cho hoạt động này.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        elapsed_delta = timezone.now() - checkin_obj.check_in_time
+        elapsed_mins = int(elapsed_delta.total_seconds() / 60)
+        remaining_mins = act_duration - elapsed_mins
+
+        if remaining_mins > 10:
+            return Response({
+                'error': f'Chưa thể check-out. Hoạt động có thời lượng {act_duration} phút. Bạn chỉ có thể check-out khi còn dưới 10 phút (Hiện tại còn {remaining_mins} phút nữa).'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        lat = float(request.data.get('latitude', 0.0))
+        lon = float(request.data.get('longitude', 0.0))
+        selfie_id = request.data.get('selfieFileId') or request.data.get('selfie_file_id', '')
+        device_id = request.data.get('deviceId') or request.data.get('device_id', 'unknown_device')
+        ip_addr = request.data.get('ipAddress') or request.data.get('ip_address') or request.META.get('REMOTE_ADDR', '127.0.0.1')
+
+        # 1. Haversine distance validation
+        def haversine(lat1, lon1, lat2, lon2):
+            dLat = (lat2 - lat1) * math.pi / 180.0
+            dLon = (lon2 - lon1) * math.pi / 180.0
+            lat1 = lat1 * math.pi / 180.0
+            lat2 = lat2 * math.pi / 180.0
+            a = (pow(math.sin(dLat / 2), 2) +
+                 pow(math.sin(dLon / 2), 2) *
+                 math.cos(lat1) * math.cos(lat2))
+            return 6371000 * 2 * math.asin(math.sqrt(a)) # meters
+
+        act_lat = float(activity.latitude) if activity.latitude is not None else 10.850100
+        act_lon = float(activity.longitude) if activity.longitude is not None else 106.771200
+        act_radius = int(activity.radius_meters) if activity.radius_meters is not None else 100
+        act_duration = int(activity.duration_minutes) if activity.duration_minutes is not None else 180
+
+        dist = haversine(act_lat, act_lon, lat, lon)
+        is_gps_invalid = dist > act_radius
+
+        if is_gps_invalid:
+            FraudDetection.objects.create(
+                student=student,
+                activity=activity,
+                rule_code="RULE_2",
+                severity="High",
+                description=f"Check-out ngoài bán kính GPS cho phép: {dist:.1f}m (Giới hạn {act_radius}m)"
+            )
+
+        # Save check-out
+        checkout_obj = ActivityCheckOut.objects.create(
+            activity=activity,
+            student=student,
+            latitude=lat,
+            longitude=lon,
+            selfie_file_id=selfie_id,
+            device_id=device_id,
+            ip_address=ip_addr
+        )
+
+        # Calculate duration
+        checkin_obj = ActivityCheckIn.objects.filter(activity=activity, student=student).order_by('-check_in_time').first()
+        duration_mins = 0
+        completion_pct = 0.0
+        is_completed = False
+
+        if checkin_obj:
+            delta = checkout_obj.check_out_time - checkin_obj.check_in_time
+            duration_mins = int(delta.total_seconds() / 60)
+            if act_duration > 0:
+                completion_pct = (duration_mins / act_duration) * 100
+                is_completed = completion_pct >= 70.0
+
+        # Update Attendance
+        attendance, _ = ActivityAttendance.objects.get_or_create(activity=activity, student=student)
+        attendance.duration_minutes = duration_mins
+        attendance.completion_percent = completion_pct
+        attendance.is_completed = is_completed
+        attendance.save()
+
+        # Update Participant status to 'attended' if completed
+        if is_completed:
+            participant = ActivityParticipant.objects.filter(activity=activity, student=student).first()
+            if participant:
+                participant.status = 'attended'
+                participant.save()
+
+        return Response({
+            'message': 'Check-out thành công',
+            'gps_valid': not is_gps_invalid,
+            'distance_meters': dist,
+            'duration_minutes': duration_mins,
+            'completion_percent': completion_pct,
+            'is_completed': is_completed,
+            'check_out': ActivityCheckOutSerializer(checkout_obj).data
+        })
+
 
 import string
 import random
@@ -602,4 +969,82 @@ class UserViewSet(viewsets.ModelViewSet):
             'message': f"Account has been {'opened' if user.is_active else 'closed'} successfully",
             'is_active': user.is_active
         })
+
+class OrganizationViewSet(viewsets.ModelViewSet):
+    queryset = Organization.objects.all()
+    serializer_class = OrganizationSerializer
+    permission_classes = [permissions.AllowAny]
+
+class UserOrganizationViewSet(viewsets.ModelViewSet):
+    queryset = UserOrganization.objects.all()
+    serializer_class = UserOrganizationSerializer
+    permission_classes = [permissions.AllowAny]
+
+class ClassPositionViewSet(viewsets.ModelViewSet):
+    queryset = ClassPosition.objects.all()
+    serializer_class = ClassPositionSerializer
+    permission_classes = [permissions.AllowAny]
+
+class StudentClassPositionViewSet(viewsets.ModelViewSet):
+    queryset = StudentClassPosition.objects.all()
+    serializer_class = StudentClassPositionSerializer
+    permission_classes = [permissions.AllowAny]
+
+class FraudDetectionViewSet(viewsets.ModelViewSet):
+    queryset = FraudDetection.objects.all()
+    serializer_class = FraudDetectionSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        queryset = FraudDetection.objects.all()
+        # support filters by rule_code, severity, student_id, activity_id
+        rule_code = self.request.query_params.get('ruleCode') or self.request.query_params.get('rule_code')
+        severity = self.request.query_params.get('severity')
+        student = self.request.query_params.get('studentId') or self.request.query_params.get('student_id')
+        activity = self.request.query_params.get('activityId') or self.request.query_params.get('activity_id')
+        
+        if rule_code:
+            queryset = queryset.filter(rule_code=rule_code)
+        if severity:
+            queryset = queryset.filter(severity=severity)
+        if student:
+            queryset = queryset.filter(student__student_id=student)
+        if activity:
+            queryset = queryset.filter(activity_id=activity)
+            
+        return queryset
+
+    @action(detail=True, methods=['post'], url_path='request-resubmit')
+    def request_resubmit(self, request, pk=None):
+        fraud = self.get_object()
+        if fraud.rule_code != 'RULE_4':
+            return Response({'error': 'Chỉ có thể yêu cầu gửi lại đối với vi phạm thiếu ảnh selfie'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if "Đã yêu cầu gửi lại" not in fraud.description:
+            fraud.description += " (Đã yêu cầu gửi lại minh chứng)"
+            fraud.save()
+            
+        AuditLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="Yêu cầu bổ sung ảnh selfie",
+            entity_name="FraudDetection",
+            entity_id=fraud.id,
+            before_value="Thiếu ảnh selfie",
+            after_value="Đang chờ sinh viên gửi lại",
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+        return Response({'message': 'Đã gửi yêu cầu bổ sung ảnh selfie thành công', 'description': fraud.description})
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = AuditLog.objects.all()
+    serializer_class = AuditLogSerializer
+    permission_classes = [permissions.AllowAny]
+
+class ChangeRequestViewSet(viewsets.ModelViewSet):
+    queryset = ChangeRequest.objects.all()
+    serializer_class = ChangeRequestSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+
 

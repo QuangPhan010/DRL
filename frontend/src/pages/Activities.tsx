@@ -1,26 +1,106 @@
-import { useState } from "react";
-import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { mockActivities, mockCriteria, Activity, mockStudents } from "@/lib/mock-data";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 export default function Activities() {
   const { user } = useAuth();
-  const [activities, setActivities] = useState<Activity[]>(mockActivities);
+  const userRoles = user?.roles || (user?.role ? [user.role] : []);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [criteria, setCriteria] = useState<any[]>(mockCriteria);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [evidenceUrl, setEvidenceUrl] = useState("");
   const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Simulation states
+  const [isQrOpen, setIsQrOpen] = useState(false);
+  const [isCheckInSimOpen, setIsCheckInSimOpen] = useState(false);
+  const [isCheckOutSimOpen, setIsCheckOutSimOpen] = useState(false);
+  const [simLat, setSimLat] = useState("10.850100");
+  const [simLon, setSimLon] = useState("106.771200");
+  const [simSelfie, setSimSelfie] = useState("selfie_sim.png");
+  const [simDeviceId, setSimDeviceId] = useState("phone_device_sim");
+
+  const openCheckInSim = (act: Activity) => {
+    setSelectedActivity(act);
+    setSimLat(act.latitude ? act.latitude.toString() : "10.850100");
+    setSimLon(act.longitude ? act.longitude.toString() : "106.771200");
+    setSimSelfie("selfie_sv_in.png");
+    setSimDeviceId("device_" + (user?.studentId || "SV001"));
+    setIsCheckInSimOpen(true);
+  };
+
+  const openCheckOutSim = (act: Activity) => {
+    setSelectedActivity(act);
+    setSimLat(act.latitude ? act.latitude.toString() : "10.850100");
+    setSimLon(act.longitude ? act.longitude.toString() : "106.771200");
+    setSimSelfie("selfie_sv_out.png");
+    setSimDeviceId("device_" + (user?.studentId || "SV001"));
+    setIsCheckOutSimOpen(true);
+  };
+
+  const getRealLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error("Trình duyệt không hỗ trợ Geolocation định vị.");
+      return;
+    }
+    toast.info("Đang yêu cầu truy cập vị trí thiết bị...");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setSimLat(position.coords.latitude.toFixed(6));
+        setSimLon(position.coords.longitude.toFixed(6));
+        toast.success("Lấy tọa độ thực tế thành công!");
+      },
+      (error) => {
+        console.error("Lỗi lấy GPS:", error);
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            toast.error("Bạn đã từ chối quyền định vị GPS.");
+            break;
+          case error.POSITION_UNAVAILABLE:
+            toast.error("Vị trí không khả dụng.");
+            break;
+          case error.TIMEOUT:
+            toast.error("Hết hạn thời gian tìm vị trí.");
+            break;
+          default:
+            toast.error("Lỗi xác định vị trí thực tế.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const getCheckoutStatus = (act: Activity) => {
+    if (!act.check_in_time) return { enabled: false, text: "Chưa Check-in", remaining: null };
+    const duration = act.duration_minutes || 180;
+    const checkIn = new Date(act.check_in_time);
+    const now = new Date();
+    const elapsedMins = Math.floor((now.getTime() - checkIn.getTime()) / (1000 * 60));
+    const remainingMins = duration - elapsedMins;
+    
+    if (remainingMins <= 10) {
+      return { enabled: true, text: `Check-out GPS (${remainingMins > 0 ? remainingMins : 0}p)`, remaining: remainingMins };
+    }
+    return { 
+      enabled: false, 
+      text: `Check-out khóa (còn ${remainingMins}p)`, 
+      remaining: remainingMins 
+    };
+  };
 
   // Form states for creating activity
   const [title, setTitle] = useState("");
@@ -28,98 +108,348 @@ export default function Activities() {
   const [points, setPoints] = useState("5");
   const [criterionId, setCriterionId] = useState("c3");
   const [date, setDate] = useState("2026-06-30");
+  const [startTime, setStartTime] = useState("08:00");
+  const [endTime, setEndTime] = useState("11:00");
+  const [isEditing, setIsEditing] = useState(false);
+  const [editActivityId, setEditActivityId] = useState<string | null>(null);
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newAct: Activity = {
-      id: `act-${Date.now()}`,
-      title,
-      description,
-      points: Number(points),
-      criterionId,
-      date,
-      organizer: user?.fullName || "Đơn vị Tổ chức",
-      status: "upcoming",
-      participants: []
-    };
-    setActivities([newAct, ...activities]);
-    setIsCreateOpen(false);
-    toast.success("Đã tạo hoạt động mới thành công!");
-    // Reset form
-    setTitle(""); setDescription(""); setPoints("5"); setCriterionId("c3");
-  };
-
-  const registerActivity = (id: string) => {
-    setActivities(activities.map(act => {
-      if (act.id === id) {
-        // Avoid duplicate
-        if (act.participants.some(p => p.studentId === user?.studentId)) return act;
-        return {
-          ...act,
-          participants: [
-            ...act.participants,
-            { studentId: user?.studentId || "SV001", fullName: user?.fullName || "Lê Minh Sinh Viên", className: "CNTT-K20A", status: "registered" }
-          ]
-        };
+  const fetchActivities = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/activities/`);
+      if (res.ok) {
+        const data = await res.json();
+        setActivities((data || []).map((act: any) => ({
+          id: act.id.toString(),
+          title: act.title,
+          description: act.description,
+          points: Number(act.points),
+          criterionId: act.criterion ? `c${act.criterion}` : "c3",
+          date: act.date,
+          organizer: act.organizer,
+          status: act.status,
+          latitude: act.latitude ? Number(act.latitude) : undefined,
+          longitude: act.longitude ? Number(act.longitude) : undefined,
+          radius_meters: act.radius_meters ? Number(act.radius_meters) : undefined,
+          duration_minutes: act.duration_minutes ? Number(act.duration_minutes) : undefined,
+          check_in_time: act.check_in_time,
+          start_time: act.start_time,
+          end_time: act.end_time,
+          participants: (act.participants || []).map((p: any) => ({
+            studentId: p.student_id || p.student.toString(),
+            fullName: p.student_name,
+            className: p.class_name,
+            status: p.status,
+            evidenceUrl: p.evidence_url
+          }))
+        })));
+      } else {
+        setActivities([]);
       }
-      return act;
-    }));
-    toast.success("Đăng ký tham gia hoạt động thành công!");
+    } catch (err) {
+      console.error(err);
+      setActivities([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const submitEvidence = (e: React.FormEvent) => {
+  useEffect(() => {
+    fetchActivities();
+    
+    // Fetch criteria if any
+    const fetchCriteria = async () => {
+      try {
+        const res = await fetch(`${API_URL}/criteria/`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.length > 0) {
+            setCriteria(data.map((c: any) => ({
+              id: `c${c.id}`,
+              code: c.code,
+              name: c.name,
+              maxScore: Number(c.max_score),
+              description: c.description
+            })));
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchCriteria();
+  }, []);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const calculateDuration = (start: string, end: string) => {
+        if (!start || !end) return 180;
+        const [sh, sm] = start.split(":").map(Number);
+        const [eh, em] = end.split(":").map(Number);
+        let diffMins = (eh * 60 + em) - (sh * 60 + sm);
+        if (diffMins < 0) diffMins += 24 * 60;
+        return diffMins;
+      };
+
+      const url = isEditing 
+        ? `${API_URL}/activities/${editActivityId}/` 
+        : `${API_URL}/activities/`;
+      const method = isEditing ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          description,
+          points: Number(points),
+          criterion: Number(criterionId.replace(/\D/g, "")) || 3,
+          date,
+          organizer: user?.fullName || "Đơn vị Tổ chức",
+          status: "upcoming",
+          latitude: 10.850100,
+          longitude: 106.771200,
+          radius_meters: 100,
+          duration_minutes: calculateDuration(startTime, endTime),
+          start_time: startTime ? `${startTime}:00` : null,
+          end_time: endTime ? `${endTime}:00` : null
+        })
+      });
+      if (res.ok) {
+        toast.success(isEditing ? "Đã cập nhật hoạt động thành công!" : "Đã tạo hoạt động mới thành công!");
+        fetchActivities();
+        setIsCreateOpen(false);
+        setTitle(""); 
+        setDescription(""); 
+        setPoints("5"); 
+        setCriterionId("c3");
+        setStartTime("08:00");
+        setEndTime("11:00");
+        setIsEditing(false);
+        setEditActivityId(null);
+      } else {
+        const errData = await res.json();
+        console.error("Lỗi từ backend:", errData);
+        toast.error("Không thể lưu hoạt động: " + JSON.stringify(errData));
+      }
+    } catch (err) {
+      console.error("Lỗi kết nối:", err);
+      toast.error("Lỗi kết nối máy chủ");
+    }
+  };
+
+  const openEditActivity = (act: Activity) => {
+    setTitle(act.title);
+    setDescription(act.description || "");
+    setPoints(act.points.toString());
+    setCriterionId(act.criterionId);
+    setDate(act.date);
+    setStartTime(act.start_time ? act.start_time.substring(0, 5) : "08:00");
+    setEndTime(act.end_time ? act.end_time.substring(0, 5) : "11:00");
+    setIsEditing(true);
+    setEditActivityId(act.id);
+    setIsCreateOpen(true);
+  };
+
+  const handleDeleteActivity = async (id: string) => {
+    if (!window.confirm("Bạn có chắc chắn muốn xóa hoạt động này?")) return;
+    try {
+      const res = await fetch(`${API_URL}/activities/${id}/`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        toast.success("Đã xóa hoạt động thành công!");
+        fetchActivities();
+      } else {
+        toast.error("Không thể xóa hoạt động");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
+  };
+
+  const registerActivity = async (id: string) => {
+    try {
+      const res = await fetch(`${API_URL}/activities/${id}/register/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: user?.studentId || "SV001"
+        })
+      });
+      if (res.ok) {
+        toast.success("Đăng ký tham gia hoạt động thành công!");
+        fetchActivities();
+      } else {
+        toast.error("Không thể đăng ký tham gia");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
+  };
+
+  const submitEvidence = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedActivity) return;
-    setActivities(activities.map(act => {
-      if (act.id === selectedActivity.id) {
-        const updatedParticipants = act.participants.map(p => {
-          if (p.studentId === user?.studentId) {
-            return { ...p, status: "evidence_submitted" as const, evidenceUrl };
-          }
-          return p;
+    try {
+      const res = await fetch(`${API_URL}/activities/${selectedActivity.id}/submit-evidence/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: user?.studentId || "SV001",
+          evidenceUrl: evidenceUrl
+        })
+      });
+      if (res.ok) {
+        toast.success("Đã nộp minh chứng thành công! Đang chờ duyệt cộng điểm.");
+        fetchActivities();
+        setIsEvidenceOpen(false);
+        setEvidenceUrl("");
+      } else {
+        toast.error("Không thể nộp minh chứng");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
+  };
+
+  const confirmAttended = async (activityId: string, studentId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/activities/${activityId}/confirm-attended/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId })
+      });
+      if (res.ok) {
+        toast.success("Đã xác nhận hoàn thành hoạt động cho sinh viên!");
+        fetchActivities();
+        // Keep updated local state for open dialog
+        const updated = await res.json();
+        setSelectedActivity({
+          id: updated.id.toString(),
+          title: updated.title,
+          description: updated.description,
+          points: Number(updated.points),
+          criterionId: updated.criterion ? `c${updated.criterion}` : "c3",
+          date: updated.date,
+          organizer: updated.organizer,
+          status: updated.status,
+          latitude: updated.latitude ? Number(updated.latitude) : undefined,
+          longitude: updated.longitude ? Number(updated.longitude) : undefined,
+          radius_meters: updated.radius_meters ? Number(updated.radius_meters) : undefined,
+          duration_minutes: updated.duration_minutes ? Number(updated.duration_minutes) : undefined,
+          check_in_time: updated.check_in_time,
+          start_time: updated.start_time,
+          end_time: updated.end_time,
+          participants: (updated.participants || []).map((p: any) => ({
+            studentId: p.student_id || p.student.toString(),
+            fullName: p.student_name,
+            className: p.class_name,
+            status: p.status,
+            evidenceUrl: p.evidence_url
+          }))
         });
-        // Check if student was not already a participant (adhoc registration + submit)
-        const exists = act.participants.some(p => p.studentId === user?.studentId);
-        if (!exists) {
-          updatedParticipants.push({
-            studentId: user?.studentId || "SV001",
-            fullName: user?.fullName || "Lê Minh Sinh Viên",
-            className: "CNTT-K20A",
-            status: "evidence_submitted",
-            evidenceUrl
-          });
-        }
-        return { ...act, participants: updatedParticipants };
+      } else {
+        toast.error("Không thể xác nhận điểm danh");
       }
-      return act;
-    }));
-    setIsEvidenceOpen(false);
-    setEvidenceUrl("");
-    toast.success("Đã nộp minh chứng thành công! Đang chờ duyệt cộng điểm.");
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
-  const confirmAttended = (activityId: string, studentId: string) => {
-    setActivities(activities.map(act => {
-      if (act.id === activityId) {
-        return {
-          ...act,
-          participants: act.participants.map(p => p.studentId === studentId ? { ...p, status: "attended" as const } : p)
-        };
+  const approvePoints = async (activityId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/activities/${activityId}/approve-points/`, {
+        method: "POST"
+      });
+      if (res.ok) {
+        toast.success("Đã duyệt đề xuất cộng điểm rèn luyện cho toàn bộ danh sách!");
+        fetchActivities();
+        setIsParticipantsOpen(false);
+      } else {
+        toast.error("Không thể duyệt hoạt động");
       }
-      return act;
-    }));
-    toast.success("Đã xác nhận hoàn thành hoạt động cho sinh viên!");
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
-  const approvePoints = (activityId: string) => {
-    setActivities(activities.map(act => {
-      if (act.id === activityId) {
-        return { ...act, status: "completed" as const };
+  const handleCheckInSim = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedActivity) return;
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
       }
-      return act;
-    }));
-    toast.success("Đã duyệt đề xuất cộng điểm rèn luyện cho toàn bộ danh sách!");
-    setIsParticipantsOpen(false);
+      
+      const res = await fetch(`${API_URL}/activities/${selectedActivity.id}/check-in/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          studentId: user?.studentId || "SV001",
+          latitude: parseFloat(simLat),
+          longitude: parseFloat(simLon),
+          selfieFileId: simSelfie,
+          deviceId: simDeviceId,
+          ipAddress: "127.0.0.1"
+        })
+      });
+      const responseText = await res.text();
+      if (res.ok) {
+        const data = JSON.parse(responseText);
+        toast.success(`Check-in thành công! Sai số GPS: ${data.distance_meters.toFixed(1)}m.`);
+        fetchActivities();
+        setIsCheckInSimOpen(false);
+      } else {
+        console.error("Lỗi 400/500 Check-in từ backend:", responseText);
+        toast.error(`Lỗi check-in: ${responseText.substring(0, 100)}`);
+      }
+    } catch (err: any) {
+      console.error("Lỗi kết nối Check-in:", err);
+      toast.error("Lỗi kết nối máy chủ: " + err.message);
+    }
+  };
+
+  const handleCheckOutSim = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedActivity) return;
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_URL}/activities/${selectedActivity.id}/check-out/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          studentId: user?.studentId || "SV001",
+          latitude: parseFloat(simLat),
+          longitude: parseFloat(simLon),
+          selfieFileId: simSelfie,
+          deviceId: simDeviceId,
+          ipAddress: "127.0.0.1"
+        })
+      });
+      const responseText = await res.text();
+      if (res.ok) {
+        const data = JSON.parse(responseText);
+        const distText = data.distance_meters !== undefined ? ` Sai số GPS: ${Number(data.distance_meters).toFixed(1)}m.` : "";
+        toast.success(`Check-out thành công!${distText}`);
+        fetchActivities();
+        setIsCheckOutSimOpen(false);
+      } else {
+        console.error("Lỗi 400/500 Check-out từ backend:", responseText);
+        toast.error(`Lỗi check-out: ${responseText.substring(0, 100)}`);
+      }
+    } catch (err: any) {
+      console.error("Lỗi kết nối Check-out:", err);
+      toast.error("Lỗi kết nối máy chủ: " + err.message);
+    }
   };
 
   return (
@@ -132,8 +462,22 @@ export default function Activities() {
           <p className="text-muted-foreground mt-1">Đăng ký tham gia, nộp minh chứng hoặc đề xuất cộng điểm rèn luyện.</p>
         </div>
 
-        {(user?.role === "organizer" || user?.role === "admin") && (
-          <Button onClick={() => setIsCreateOpen(true)} className="bg-gradient-primary gap-2">
+        {!userRoles.includes("student") && (
+          <Button 
+            onClick={() => {
+              setIsEditing(false);
+              setEditActivityId(null);
+              setTitle("");
+              setDescription("");
+              setPoints("5");
+              setCriterionId("c3");
+              setDate("2026-06-30");
+              setStartTime("08:00");
+              setEndTime("11:00");
+              setIsCreateOpen(true);
+            }} 
+            className="bg-gradient-primary gap-2"
+          >
             <Plus className="h-4 w-4" />Tạo hoạt động
           </Button>
         )}
@@ -143,7 +487,7 @@ export default function Activities() {
         {activities.map(act => {
           const isRegistered = act.participants.some(p => p.studentId === user?.studentId);
           const studentStatus = act.participants.find(p => p.studentId === user?.studentId)?.status;
-          const criterion = mockCriteria.find(c => c.id === act.criterionId);
+          const criterion = criteria.find(c => c.id === act.criterionId);
 
           return (
             <Card key={act.id} className="border-0 shadow-md bg-gradient-card flex flex-col justify-between">
@@ -160,8 +504,10 @@ export default function Activities() {
               <CardContent className="space-y-4 pt-0">
                 <div className="flex justify-between items-center text-xs border-t pt-3">
                   <div>
-                    <span className="text-muted-foreground block">Ngày diễn ra</span>
-                    <span className="font-medium">{act.date}</span>
+                    <span className="text-muted-foreground block">Thời gian diễn ra</span>
+                    <span className="font-medium">
+                      {act.date} {act.start_time && `(${act.start_time.substring(0, 5)} - ${act.end_time?.substring(0, 5)})`}
+                    </span>
                   </div>
                   <div className="text-right">
                     <span className="text-muted-foreground block">Điểm đề xuất</span>
@@ -175,13 +521,30 @@ export default function Activities() {
                     <span>{act.participants.length} người đăng ký</span>
                   </div>
 
-                  {user?.role === "student" && (
-                    <div className="flex gap-2">
+                  {userRoles.includes("student") && (
+                    <div className="flex flex-wrap gap-2">
                       {!isRegistered && act.status === "upcoming" && (
                         <Button size="sm" onClick={() => registerActivity(act.id)}>Đăng ký</Button>
                       )}
                       {isRegistered && studentStatus === "registered" && (
-                        <Badge variant="outline" className="bg-primary/5 text-primary">Đã đăng ký</Badge>
+                        <div className="flex gap-1.5">
+                          <Button 
+                            size="xs" 
+                            onClick={() => openCheckInSim(act)} 
+                            disabled={!!act.check_in_time && !act.selfie_resubmit_requested}
+                            className="bg-success hover:bg-success/90 text-white text-xs h-8 px-2.5 disabled:opacity-60"
+                          >
+                            <MapPin className="h-3.5 w-3.5" /> {act.selfie_resubmit_requested ? "Bổ sung Selfie" : (act.check_in_time ? "Đã Check-in" : "Check-in GPS")}
+                          </Button>
+                          <Button 
+                            size="xs" 
+                            onClick={() => openCheckOutSim(act)} 
+                            disabled={!getCheckoutStatus(act).enabled}
+                            className="bg-warning hover:bg-warning/90 text-black dark:text-white text-xs h-8 px-2.5 disabled:opacity-60"
+                          >
+                            <MapPin className="h-3.5 w-3.5" /> {getCheckoutStatus(act).text}
+                          </Button>
+                        </div>
                       )}
                       {studentStatus === "attended" && (
                         <Badge variant="outline" className="bg-success/5 text-success">Đã tham gia</Badge>
@@ -197,10 +560,25 @@ export default function Activities() {
                     </div>
                   )}
 
-                  {(user?.role === "organizer" || user?.role === "admin" || user?.role === "advisor") && (
-                    <Button size="sm" variant="outline" className="gap-1 border-primary/20" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
-                      Danh sách ({act.participants.length})
-                    </Button>
+                  {!userRoles.includes("student") && (
+                    <div className="flex flex-wrap gap-2 w-full justify-between items-center mt-2">
+                      <div className="flex gap-1.5">
+                        <Button size="xs" variant="outline" className="gap-1 border-primary/20 text-primary h-8 px-2" onClick={() => { setSelectedActivity(act); setIsQrOpen(true); }}>
+                          <QrCode className="h-3.5 w-3.5" /> Mã QR
+                        </Button>
+                        <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
+                          Danh sách ({act.participants.length})
+                        </Button>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Button size="xs" variant="outline" className="h-8 px-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => openEditActivity(act)}>
+                          Sửa
+                        </Button>
+                        <Button size="xs" variant="outline" className="h-8 px-2 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleDeleteActivity(act.id)}>
+                          Xóa
+                        </Button>
+                      </div>
+                    </div>
                   )}
                 </div>
               </CardContent>
@@ -212,7 +590,11 @@ export default function Activities() {
       {/* Dialog: Create Activity */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-display">Tạo hoạt động rèn luyện</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-display">
+              {isEditing ? "Chỉnh sửa hoạt động rèn luyện" : "Tạo hoạt động rèn luyện"}
+            </DialogTitle>
+          </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="title">Tên hoạt động</Label>
@@ -232,18 +614,30 @@ export default function Activities() {
                 <Select value={criterionId} onValueChange={setCriterionId}>
                   <SelectTrigger id="criterion"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {mockCriteria.map(c => <SelectItem key={c.id} value={c.id}>{c.code}. {c.name}</SelectItem>)}
+                    {criteria.map(c => <SelectItem key={c.id} value={c.id}>{c.code}. {c.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="date">Ngày tổ chức</Label>
-              <Input id="date" type="date" value={date} onChange={e => setDate(e.target.value)} required />
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2 col-span-1">
+                <Label htmlFor="date">Ngày tổ chức</Label>
+                <Input id="date" type="date" value={date} onChange={e => setDate(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="startTime">Giờ bắt đầu</Label>
+                <Input id="startTime" type="time" value={startTime} onChange={e => setStartTime(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="endTime">Giờ kết thúc</Label>
+                <Input id="endTime" type="time" value={endTime} onChange={e => setEndTime(e.target.value)} required />
+              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>Hủy</Button>
-              <Button type="submit" className="bg-gradient-primary">Tạo mới</Button>
+              <Button type="submit" className="bg-gradient-primary">
+                {isEditing ? "Cập nhật" : "Tạo mới"}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -284,7 +678,7 @@ export default function Activities() {
                   <p className="text-sm font-semibold">Tình trạng: {selectedActivity.status === "completed" ? "Đã hoàn thành" : "Sắp diễn ra"}</p>
                   <p className="text-xs text-muted-foreground">{selectedActivity.participants.length} sinh viên tham gia</p>
                 </div>
-                {selectedActivity.status === "upcoming" && (user?.role === "organizer" || user?.role === "admin") && (
+                {selectedActivity.status === "upcoming" && !userRoles.includes("student") && (
                   <Button size="sm" onClick={() => approvePoints(selectedActivity.id)} className="bg-success hover:bg-success/90 gap-1">
                     <Check className="h-4 w-4" /> Hoàn thành & Đề xuất điểm
                   </Button>
@@ -318,12 +712,12 @@ export default function Activities() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {p.status === "evidence_submitted" && (user?.role === "organizer" || user?.role === "admin") && (
+                        {p.status === "evidence_submitted" && !userRoles.includes("student") && (
                           <Button size="xs" onClick={() => confirmAttended(selectedActivity.id, p.studentId)} className="bg-success text-white hover:bg-success/90 text-xs px-2 py-1 h-7">
                             Xác nhận điểm
                           </Button>
                         )}
-                        {p.status === "registered" && (user?.role === "organizer" || user?.role === "admin") && (
+                        {p.status === "registered" && !userRoles.includes("student") && (
                           <Button size="xs" onClick={() => confirmAttended(selectedActivity.id, p.studentId)} className="bg-primary text-white hover:bg-primary/90 text-xs px-2 py-1 h-7">
                             Điểm danh
                           </Button>
@@ -340,6 +734,144 @@ export default function Activities() {
               </Table>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Display QR Code */}
+      <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>
+        <DialogContent className="max-w-xs text-center">
+          <DialogHeader>
+            <DialogTitle className="font-display text-center">Mã QR Điểm Danh</DialogTitle>
+            <DialogDescription className="text-center">Hãy đưa mã này cho sinh viên quét để Check-in/out.</DialogDescription>
+          </DialogHeader>
+          {selectedActivity && (
+            <div className="py-6 flex flex-col items-center gap-4">
+              <div className="border p-3 rounded-2xl bg-white shadow-inner">
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(JSON.stringify({ activityId: Number(selectedActivity.id), token: "ACT_" + selectedActivity.id }))}`}
+                  alt="QR Code" 
+                  className="h-44 w-44 object-contain"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="font-bold text-sm text-primary">{selectedActivity.title}</p>
+                <p className="text-xs text-muted-foreground font-mono">Token: ACT_{selectedActivity.id}</p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button className="w-full" onClick={() => setIsQrOpen(false)}>Đóng</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Simulate Check-In (GPS + Selfie) */}
+      <Dialog open={isCheckInSimOpen} onOpenChange={setIsCheckInSimOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-success" /> Điểm danh hoạt động (Check-in)
+            </DialogTitle>
+            <DialogDescription>Xác thực vị trí GPS và ảnh chụp Selfie thực tế của bạn để hoàn tất điểm danh vào hoạt động.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCheckInSim} className="space-y-4">
+            
+            <Button 
+              type="button" 
+              variant="outline" 
+              size="sm" 
+              onClick={getRealLocation} 
+              className="w-full gap-2 border-primary text-primary h-9 text-xs"
+            >
+              <MapPin className="h-3.5 w-3.5" /> Sử dụng Vị trí Thực tế của thiết bị
+            </Button>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="simLat">Kinh độ (Latitude)</Label>
+                <Input id="simLat" value={simLat} readOnly disabled className="bg-muted text-muted-foreground font-mono" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="simLon">Vĩ độ (Longitude)</Label>
+                <Input id="simLon" value={simLon} readOnly disabled className="bg-muted text-muted-foreground font-mono" required />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="simSelfie">Ảnh chụp Selfie minh chứng (Chụp ảnh hoặc từ Album) *</Label>
+              <Input 
+                id="simSelfie" 
+                type="file" 
+                accept="image/*" 
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  setSimSelfie(file ? file.name : "");
+                }} 
+              />
+            </div>
+
+            <input id="simDeviceId" type="hidden" value={simDeviceId} />
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsCheckInSimOpen(false)}>Hủy</Button>
+              <Button type="submit" className="bg-success text-white hover:bg-success/90">Gửi Check-in</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Simulate Check-Out (GPS) */}
+      <Dialog open={isCheckOutSimOpen} onOpenChange={setIsCheckOutSimOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-warning" /> Điểm danh kết thúc (Check-out)
+            </DialogTitle>
+            <DialogDescription>Xác thực vị trí GPS và ảnh chụp Selfie của bạn để hoàn tất thời gian tham gia hoạt động.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCheckOutSim} className="space-y-4">
+            
+            <Button 
+              type="button" 
+              variant="outline" 
+              size="sm" 
+              onClick={getRealLocation} 
+              className="w-full gap-2 border-primary text-primary h-9 text-xs"
+            >
+              <MapPin className="h-3.5 w-3.5" /> Sử dụng Vị trí Thực tế của thiết bị
+            </Button>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="simLatOut">Kinh độ (Latitude)</Label>
+                <Input id="simLatOut" value={simLat} readOnly disabled className="bg-muted text-muted-foreground font-mono" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="simLonOut">Vĩ độ (Longitude)</Label>
+                <Input id="simLonOut" value={simLon} readOnly disabled className="bg-muted text-muted-foreground font-mono" required />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="simSelfieOut">Ảnh chụp Selfie xác nhận *</Label>
+              <Input 
+                id="simSelfieOut" 
+                type="file" 
+                accept="image/*" 
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  setSimSelfie(file ? file.name : "");
+                }} 
+              />
+            </div>
+
+            <input id="simDeviceIdOut" type="hidden" value={simDeviceId} />
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsCheckOutSimOpen(false)}>Hủy</Button>
+              <Button type="submit" className="bg-warning text-black dark:text-white hover:bg-warning/90">Gửi Check-out</Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

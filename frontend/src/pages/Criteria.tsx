@@ -161,7 +161,7 @@ export default function Criteria() {
     }));
   };
 
-  const save = () => {
+  const save = async () => {
     if (!name) { toast.error("Vui lòng nhập tên tiêu chí lớn"); return; }
     
     // Auto-calculate parent maxScore based on positive scores in subitems
@@ -185,27 +185,66 @@ export default function Criteria() {
       calculatedMaxScore = sum;
     }
 
-    const savedData: Omit<Criterion, "id"> & { id?: string } = {
+    const payload = {
       code,
       name,
       maxScore: calculatedMaxScore,
       description,
-      groups
+      groups: groups.map(g => ({
+        name: g.name,
+        subItems: g.subItems.map(s => ({
+          name: s.name,
+          maxScore: s.maxScore
+        }))
+      }))
     };
 
-    if (editing) {
-      setCriteria(criteria.map(c => c.id === editing.id ? { ...c, ...savedData } as Criterion : c));
-      toast.success("Đã cập nhật hệ thống tiêu chí 3 cấp thành công!");
-    } else {
-      setCriteria([...criteria, { ...savedData, id: `c${Date.now()}` } as Criterion]);
-      toast.success("Đã tạo tiêu chí lớn và các nhóm mới!");
+    try {
+      if (editing) {
+        const res = await fetch(`${API_URL}/criteria/${editing.id}/`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          toast.success("Đã cập nhật hệ thống tiêu chí 3 cấp thành công!");
+          fetchCriteria();
+        } else {
+          toast.error("Không thể cập nhật tiêu chí");
+        }
+      } else {
+        const res = await fetch(`${API_URL}/criteria/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          toast.success("Đã tạo tiêu chí lớn và các nhóm mới!");
+          fetchCriteria();
+        } else {
+          toast.error("Không thể tạo tiêu chí");
+        }
+      }
+      setOpen(false);
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
     }
-    setOpen(false);
   };
 
-  const remove = (id: string) => {
-    setCriteria(criteria.filter(c => c.id !== id));
-    toast.success("Đã xóa tiêu chí lớn");
+  const remove = async (id: string) => {
+    try {
+      const res = await fetch(`${API_URL}/criteria/${id}/`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        toast.success("Đã xóa tiêu chí lớn");
+        fetchCriteria();
+      } else {
+        toast.error("Không thể xóa tiêu chí");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối máy chủ");
+    }
   };
 
   return (

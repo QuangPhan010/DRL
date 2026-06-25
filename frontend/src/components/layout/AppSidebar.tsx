@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ClipboardList, FileCheck, Settings, GraduationCap, User as UserIcon, Sparkles,
-  CalendarDays, ClipboardCheck, RefreshCw,
+  CalendarDays, ClipboardCheck, RefreshCw, ShieldAlert,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -22,6 +22,7 @@ const navItems: NavItem[] = [
   { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "student_affairs", "admin"] },
   { title: "Đồng bộ điểm học tập", url: "/data-sync", icon: RefreshCw, roles: ["academic_affairs", "admin"] },
   { title: "Quản lý sinh viên", url: "/students", icon: Users, roles: ["admin", "advisor", "student_affairs", "class_monitor"] },
+  { title: "Giám sát gian lận", url: "/fraud-monitor", icon: ShieldAlert, roles: ["admin", "student_affairs"] },
   { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin", "student_affairs"] },
   { title: "Cấu hình hệ thống", url: "/settings", icon: Settings, roles: ["admin"] },
 ];
@@ -32,10 +33,11 @@ export function AppSidebar() {
   const { pathname } = useLocation();
   const { user } = useAuth();
 
+  const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const items = navItems
-    .filter(i => user && i.roles.includes(user.role))
+    .filter(i => user && i.roles.some(r => userRoles.includes(r)))
     .map(i => {
-      if (i.url === "/students" && user?.role === "class_monitor") {
+      if (i.url === "/students" && userRoles.includes("class_monitor")) {
         return { ...i, title: "Thành viên lớp" };
       }
       return i;

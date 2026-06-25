@@ -1,14 +1,40 @@
 export type Role = "admin" | "advisor" | "student" | "organizer" | "class_monitor" | "student_affairs" | "academic_affairs";
 
+export interface UserOrganization {
+  id: string;
+  organization: string;
+  organization_name: string;
+  organization_type: string;
+  position: string;
+}
+
 export interface User {
   id: string;
   username: string;
   password: string;
   fullName: string;
   role: Role;
+  roles: Role[];
   email: string;
   studentId?: string;
   avatar?: string;
+  organizations?: UserOrganization[];
+}
+
+
+export interface ClassPosition {
+  id: string;
+  name: string;
+}
+
+export interface StudentClassPosition {
+  id: string;
+  class_info: string;
+  position: string;
+  position_name: string;
+  assigned_by?: string;
+  assigned_by_name?: string;
+  assigned_date: string;
 }
 
 export interface Student {
@@ -22,7 +48,9 @@ export interface Student {
   gender: "Nam" | "Nữ";
   phone: string;
   password?: string;
+  positions?: StudentClassPosition[];
 }
+
 
 export interface ClassInfo {
   id: string;
@@ -83,18 +111,137 @@ export interface Activity {
   organizer: string;
   status: "upcoming" | "completed";
   participants: { studentId: string; fullName: string; className: string; status: "registered" | "attended" | "evidence_submitted"; evidenceUrl?: string }[];
+  latitude?: number;
+  longitude?: number;
+  radius_meters?: number;
+  duration_minutes?: number;
+  start_time?: string;
+  end_time?: string;
 }
 
+export interface ActivityCheckIn {
+  id: string;
+  activity: string;
+  student: string;
+  student_name?: string;
+  check_in_time: string;
+  latitude: number;
+  longitude: number;
+  selfie_file_id?: string;
+  device_id: string;
+  ip_address: string;
+}
+
+export interface ActivityCheckOut {
+  id: string;
+  activity: string;
+  student: string;
+  student_name?: string;
+  check_out_time: string;
+  latitude: number;
+  longitude: number;
+  selfie_file_id?: string;
+  device_id: string;
+  ip_address: string;
+}
+
+export interface ActivityAttendance {
+  id: string;
+  activity: string;
+  student: string;
+  student_name?: string;
+  student_id_str?: string;
+  class_name?: string;
+  duration_minutes: number;
+  completion_percent: number;
+  is_completed: boolean;
+}
+
+export interface FraudDetection {
+  id: string;
+  student?: string;
+  student_name?: string;
+  student_id_str?: string;
+  activity?: string;
+  activity_title?: string;
+  rule_code: string;
+  severity: "High" | "Medium" | "Critical";
+  description: string;
+  created_at: string;
+}
+
+export interface AuditLog {
+  id: string;
+  user?: string;
+  user_name?: string;
+  action: string;
+  entity_name: string;
+  entity_id?: number;
+  before_value?: string;
+  after_value?: string;
+  ip_address?: string;
+  device_id?: string;
+  created_at: string;
+}
+
+export interface ChangeRequest {
+  id: string;
+  request_type: string;
+  reason: string;
+  requested_by: string;
+  requested_by_name?: string;
+  approved_by?: string;
+  approved_by_name?: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
+
 export const mockUsers: User[] = [
-  { id: "u1", username: "admin", password: "admin123", fullName: "Nguyễn Quản Trị", role: "admin", email: "admin@university.edu.vn" },
-  { id: "u2", username: "advisor", password: "advisor123", fullName: "TS. Trần Văn Cố Vấn", role: "advisor", email: "advisor@university.edu.vn" },
-  { id: "u3", username: "student", password: "student123", fullName: "Lê Minh Sinh Viên", role: "student", email: "sv001@university.edu.vn", studentId: "SV001" },
-  { id: "u4", username: "organizer", password: "organizer123", fullName: "Đoàn Thanh Niên", role: "organizer", email: "doanthanhnien@university.edu.vn" },
-  { id: "u5", username: "monitor", password: "monitor123", fullName: "Nguyễn Văn Lớp Trưởng", role: "class_monitor", email: "sv002@university.edu.vn", studentId: "SV002" },
-  { id: "u6", username: "affairs", password: "affairs123", fullName: "Phòng Công tác Sinh viên", role: "student_affairs", email: "ctsv@university.edu.vn" },
-  { id: "u7", username: "academic", password: "academic123", fullName: "Phòng Đào tạo", role: "academic_affairs", email: "daotao@university.edu.vn" },
-  { id: "u8", username: "advisor2", password: "advisor123", fullName: "ThS. Nguyễn Thị Cố Vấn", role: "advisor", email: "advisor2@university.edu.vn" },
-  { id: "u9", username: "advisor3", password: "advisor123", fullName: "ThS. Phạm Hoàng Nam", role: "advisor", email: "advisor3@university.edu.vn" },
+  { id: "u1", username: "admin", password: "admin123", fullName: "Nguyễn Quản Trị", role: "admin", roles: ["admin"], email: "admin@university.edu.vn" },
+  { 
+    id: "u2", 
+    username: "advisor", 
+    password: "advisor123", 
+    fullName: "TS. Trần Văn Cố Vấn", 
+    role: "advisor", 
+    roles: ["advisor", "organizer"], 
+    email: "advisor@university.edu.vn",
+    organizations: [
+      { id: "o3", organization: "2", organization_name: "Khoa CNTT", organization_type: "Khoa", position: "Phụ trách" }
+    ]
+  },
+  { 
+    id: "u3", 
+    username: "student", 
+    password: "student123", 
+    fullName: "Lê Minh Sinh Viên", 
+    role: "student", 
+    roles: ["student", "organizer"], 
+    email: "sv001@university.edu.vn", 
+    studentId: "SV001",
+    organizations: [
+      { id: "o1", organization: "1", organization_name: "CLB Tin học", organization_type: "CLB", position: "Chủ nhiệm" }
+    ]
+  },
+  { id: "u4", username: "organizer", password: "organizer123", fullName: "Đoàn Thanh Niên", role: "organizer", roles: ["organizer"], email: "doanthanhnien@university.edu.vn" },
+  { 
+    id: "u5", 
+    username: "monitor", 
+    password: "monitor123", 
+    fullName: "Nguyễn Văn Lớp Trưởng", 
+    role: "class_monitor", 
+    roles: ["class_monitor", "student", "organizer"], 
+    email: "sv002@university.edu.vn", 
+    studentId: "SV002",
+    organizations: [
+      { id: "o2", organization: "1", organization_name: "CLB Tin học", organization_type: "CLB", position: "Phó chủ nhiệm" }
+    ]
+  },
+  { id: "u6", username: "affairs", password: "affairs123", fullName: "Phòng Công tác Sinh viên", role: "student_affairs", roles: ["student_affairs"], email: "ctsv@university.edu.vn" },
+  { id: "u7", username: "academic", password: "academic123", fullName: "Phòng Đào tạo", role: "academic_affairs", roles: ["academic_affairs"], email: "daotao@university.edu.vn" },
+  { id: "u8", username: "advisor2", password: "advisor123", fullName: "ThS. Nguyễn Thị Cố Vấn", role: "advisor", roles: ["advisor"], email: "advisor2@university.edu.vn" },
+  { id: "u9", username: "advisor3", password: "advisor123", fullName: "ThS. Phạm Hoàng Nam", role: "advisor", roles: ["advisor"], email: "advisor3@university.edu.vn" },
 ];
 
 export const mockClasses: ClassInfo[] = [

@@ -57,9 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           fullName: u.full_name,
           email: u.email,
           role: u.role,
+          roles: u.roles || [u.role],
           studentId: u.student_id,
           isFirstLogin: u.is_first_login,
-          isActive: u.is_active
+          isActive: u.is_active,
+          organizations: u.organizations || []
         }));
         setAllUsers(mapped);
       }
@@ -91,9 +93,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         fullName: data.user.full_name,
         email: data.user.email,
         role: data.user.role,
+        roles: data.user.roles || [data.user.role],
         studentId: data.user.student_id,
         isFirstLogin: data.is_first_login,
-        isActive: true
+        isActive: true,
+        organizations: data.user.organizations || []
       };
 
       localStorage.setItem("drl_token", data.token);
@@ -131,9 +135,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           fullName: data.user.full_name,
           email: data.user.email,
           role: data.user.role,
+          roles: data.user.roles || [data.user.role],
           studentId: data.user.student_id,
           isFirstLogin: false,
-          isActive: true
+          isActive: true,
+          organizations: data.user.organizations || []
         };
         setUser(mappedUser);
       } else {

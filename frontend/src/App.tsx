@@ -17,6 +17,7 @@ import Activities from "./pages/Activities";
 import ClassReview from "./pages/ClassReview";
 import DataSync from "./pages/DataSync";
 import Classes from "./pages/Classes";
+import FraudDashboard from "./pages/FraudDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -42,6 +43,7 @@ const App = () => (
               <Route path="/activities" element={<Activities />} />
               <Route path="/class-review" element={<ClassReview />} />
               <Route path="/data-sync" element={<DataSync />} />
+              <Route path="/fraud-monitor" element={<FraudDashboard />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

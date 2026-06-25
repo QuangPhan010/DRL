@@ -275,13 +275,20 @@ export default function SettingsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {allUsers.filter(u => u.role !== "student" && u.role !== "class_monitor").map(u => (
+                {allUsers.filter(u => (u.role !== "student" && u.role !== "class_monitor") || (u.organizations && u.organizations.length > 0)).map(u => (
                   <TableRow key={u.id} className="hover:bg-muted/20">
                     <TableCell>
                       <div className="font-medium">{u.fullName}</div>
-                      {u.isFirstLogin && (
-                        <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">Đăng nhập lần đầu</span>
-                      )}
+                      <div className="flex flex-wrap gap-1 mt-1 items-center">
+                        {u.isFirstLogin && (
+                          <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">Đăng nhập lần đầu</span>
+                        )}
+                        {u.organizations && u.organizations.map(org => (
+                          <Badge key={org.id} variant="outline" className="text-[10px] bg-primary/5 text-primary border-primary/20">
+                            {org.organization_name} ({org.position})
+                          </Badge>
+                        ))}
+                      </div>
                     </TableCell>
                     <TableCell className="font-mono text-sm">{u.studentId || u.username}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{u.email}</TableCell>

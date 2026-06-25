@@ -1,7 +1,7 @@
 import datetime
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from drl_app.models import ClassInfo, Student, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant
+from drl_app.models import ClassInfo, Student, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization
 
 User = get_user_model()
 
@@ -10,6 +10,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write('Clearing existing data...')
+        UserOrganization.objects.all().delete()
+        Organization.objects.all().delete()
         ActivityParticipant.objects.all().delete()
         Activity.objects.all().delete()
         EvaluationDetail.objects.all().delete()
@@ -20,6 +22,7 @@ class Command(BaseCommand):
         Student.objects.all().delete()
         ClassInfo.objects.all().delete()
         User.objects.all().delete()
+
 
         self.stdout.write('Creating users...')
         users_data = [
@@ -46,6 +49,15 @@ class Command(BaseCommand):
                 plain_password=u['password']
             )
             db_users[u['username']] = user
+
+        self.stdout.write('Creating organizations and user-organizations...')
+        clb = Organization.objects.create(name='CLB Tin học', type='CLB')
+        khoa = Organization.objects.create(name='Khoa CNTT', type='Khoa')
+        
+        UserOrganization.objects.create(user=db_users['student'], organization=clb, position='Chủ nhiệm')
+        UserOrganization.objects.create(user=db_users['monitor'], organization=clb, position='Phó chủ nhiệm')
+        UserOrganization.objects.create(user=db_users['advisor'], organization=khoa, position='Phụ trách')
+
 
         self.stdout.write('Creating classes...')
         classes_data = [
