@@ -54,6 +54,16 @@ export default function Activities() {
       setLocation("");
       setEndDate("2026-06-30");
       setActivityType("Hoạt động xã hội");
+      setScopeType("all");
+      setSelectedClasses([]);
+      setSelectedClubs([]);
+      setIsRegistrationRequired(false);
+      setRegistrationStartDate("2026-06-30");
+      setRegistrationStartTime("08:00");
+      setRegistrationEndDate("2026-06-30");
+      setRegistrationEndTime("11:00");
+      setClassSearch("");
+      setClubSearch("");
     }
   };
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
@@ -64,7 +74,7 @@ export default function Activities() {
 
   // Time picker states
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
-  const [timePickerTarget, setTimePickerTarget] = useState<'start' | 'end'>('start');
+  const [timePickerTarget, setTimePickerTarget] = useState<'start' | 'end' | 'regStart' | 'regEnd'>('start');
 
   // Simulation states
   const [isQrOpen, setIsQrOpen] = useState(false);
@@ -155,6 +165,23 @@ export default function Activities() {
   const [isEditing, setIsEditing] = useState(false);
   const [editActivityId, setEditActivityId] = useState<string | null>(null);
 
+  // New scope and registration fields
+  const [scopeType, setScopeType] = useState<"all" | "class" | "club">("all");
+  const [selectedClasses, setSelectedClasses] = useState<number[]>([]);
+  const [selectedClubs, setSelectedClubs] = useState<number[]>([]);
+  const [isRegistrationRequired, setIsRegistrationRequired] = useState(false);
+  const [registrationStartDate, setRegistrationStartDate] = useState("2026-06-30");
+  const [registrationStartTime, setRegistrationStartTime] = useState("08:00");
+  const [registrationEndDate, setRegistrationEndDate] = useState("2026-06-30");
+  const [registrationEndTime, setRegistrationEndTime] = useState("11:00");
+
+  const [classList, setClassList] = useState<any[]>([]);
+  const [clubList, setClubList] = useState<any[]>([]);
+
+  // Search states for filtering classes and clubs
+  const [classSearch, setClassSearch] = useState("");
+  const [clubSearch, setClubSearch] = useState("");
+
   // Off-campus fields
   const [organizerName, setOrganizerName] = useState("");
   const [location, setLocation] = useState("");
@@ -183,6 +210,12 @@ export default function Activities() {
           check_in_time: act.check_in_time,
           start_time: act.start_time,
           end_time: act.end_time,
+          scope_type: act.scope_type,
+          allowed_classes: act.allowed_classes,
+          allowed_clubs: act.allowed_clubs,
+          is_registration_required: act.is_registration_required,
+          registration_start: act.registration_start,
+          registration_end: act.registration_end,
           participants: (act.participants || []).map((p: any) => ({
             studentId: p.student_id || p.student.toString(),
             fullName: p.student_name,
@@ -230,6 +263,25 @@ export default function Activities() {
       }
     };
     fetchCriteria();
+
+    // Fetch classes and clubs for scope selection
+    const fetchClassesAndClubs = async () => {
+      try {
+        const classRes = await fetch(`${API_URL}/classes/`);
+        if (classRes.ok) {
+          const classData = await classRes.json();
+          setClassList(classData);
+        }
+        const orgRes = await fetch(`${API_URL}/organizations/`);
+        if (orgRes.ok) {
+          const orgData = await orgRes.json();
+          setClubList(orgData.filter((org: any) => org.type === "CLB"));
+        }
+      } catch (err) {
+        console.error("Error fetching classes or clubs:", err);
+      }
+    };
+    fetchClassesAndClubs();
   }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -266,7 +318,13 @@ export default function Activities() {
             radius_meters: 100,
             duration_minutes: calculateDuration(startTime, endTime),
             start_time: startTime ? `${startTime}:00` : null,
-            end_time: endTime ? `${endTime}:00` : null
+            end_time: endTime ? `${endTime}:00` : null,
+            scope_type: scopeType,
+            allowed_classes: scopeType === "class" ? selectedClasses : [],
+            allowed_clubs: scopeType === "club" ? selectedClubs : [],
+            is_registration_required: isRegistrationRequired,
+            registration_start: isRegistrationRequired && registrationStartDate && registrationStartTime ? new Date(`${registrationStartDate}T${registrationStartTime}:00`).toISOString() : null,
+            registration_end: isRegistrationRequired && registrationEndDate && registrationEndTime ? new Date(`${registrationEndDate}T${registrationEndTime}:00`).toISOString() : null
           })
         });
       } else {
@@ -335,6 +393,33 @@ export default function Activities() {
     setEndTime(act.end_time ? act.end_time.substring(0, 5) : "11:00");
     setIsEditing(true);
     setEditActivityId(act.id);
+    
+    // Set scope and registration states
+    setScopeType(act.scope_type || "all");
+    setSelectedClasses(act.allowed_classes || []);
+    setSelectedClubs(act.allowed_clubs || []);
+    setIsRegistrationRequired(!!act.is_registration_required);
+    
+    const toLocalDateAndTime = (isoString?: string) => {
+      if (!isoString) return { date: "", time: "08:00" };
+      const d = new Date(isoString);
+      const offset = d.getTimezoneOffset();
+      const localDate = new Date(d.getTime() - offset * 60 * 1000);
+      const isoStr = localDate.toISOString();
+      return {
+        date: isoStr.slice(0, 10),
+        time: isoStr.slice(11, 16)
+      };
+    };
+    
+    const regStartVal = toLocalDateAndTime(act.registration_start);
+    setRegistrationStartDate(regStartVal.date || "2026-06-30");
+    setRegistrationStartTime(regStartVal.time || "08:00");
+    
+    const regEndVal = toLocalDateAndTime(act.registration_end);
+    setRegistrationEndDate(regEndVal.date || "2026-06-30");
+    setRegistrationEndTime(regEndVal.time || "11:00");
+    
     setIsCreateOpen(true);
   };
 
@@ -550,18 +635,7 @@ export default function Activities() {
 
         {!userRoles.includes("student") && (
           <Button
-            onClick={() => {
-              setIsEditing(false);
-              setEditActivityId(null);
-              setTitle("");
-              setDescription("");
-              setPoints("5");
-              setCriterionId("c1");
-              setDate("2026-06-30");
-              setStartTime("08:00");
-              setEndTime("11:00");
-              setIsCreateOpen(true);
-            }}
+            onClick={() => navigate("/activities/create")}
             className="bg-gradient-primary gap-2"
           >
             <Plus className="h-4 w-4" />Tạo hoạt động
@@ -615,7 +689,17 @@ export default function Activities() {
                       <span>{act.title}</span>
                       <Eye className="h-4 w-4 opacity-50 shrink-0 hover:opacity-100" />
                     </CardTitle>
-                    <CardDescription className="line-clamp-3 text-sm mt-1">{act.description}</CardDescription>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      <Badge variant="outline" className="text-[10px] bg-muted/40 font-medium py-0.5 px-2">
+                        {act.scope_type === "class" ? "Giới hạn Lớp" : act.scope_type === "club" ? "Giới hạn CLB" : "Toàn trường"}
+                      </Badge>
+                      {act.is_registration_required && (
+                        <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-500 border-amber-500/20 font-medium py-0.5 px-2">
+                          Cần đăng ký trước
+                        </Badge>
+                      )}
+                    </div>
+                    <CardDescription className="line-clamp-3 text-sm mt-2">{act.description}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4 pt-0">
                     <div className="flex justify-between items-center text-xs border-t pt-3">
@@ -639,7 +723,7 @@ export default function Activities() {
 
                       {userRoles.includes("student") && (
                         <div className="flex flex-wrap gap-2">
-                          {!isRegistered && act.status === "upcoming" && (
+                          {!isRegistered && act.status === "upcoming" && act.is_registration_required && (
                             <Button size="sm" onClick={() => registerActivity(act.id)}>Đăng ký</Button>
                           )}
                           {/* Check-in/out buttons hidden here - handled inside detail page */}
@@ -668,7 +752,7 @@ export default function Activities() {
                             </Button>
                           </div>
                           <div className="flex gap-1.5">
-                            <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => openEditActivity(act)}>
+                            <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => navigate(`/activities/${act.id}/edit`)}>
                               Sửa
                             </Button>
                             <Button size="xs" className="h-8 px-2 text-red-600 border border-red-200 bg-transparent hover:bg-red-50 hover:text-red-700 transition-colors" onClick={() => handleDeleteActivity(act.id)}>
@@ -693,11 +777,14 @@ export default function Activities() {
 
       {/* Dialog: Create Activity */}
       <Dialog open={isCreateOpen} onOpenChange={handleOpenCreateChange}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle className="font-display">
               {isEditing ? "Chỉnh sửa hoạt động rèn luyện" : "Tạo hoạt động rèn luyện"}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Điền các thông tin cần thiết để tạo mới hoặc chỉnh sửa hoạt động rèn luyện.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
             <div className="space-y-2">
@@ -753,7 +840,7 @@ export default function Activities() {
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2 col-span-1">
                     <Label htmlFor="date">Ngày tổ chức</Label>
-                    <Input id="date" type="date" value={date} onChange={e => setDate(e.target.value)} required />
+                    <Input id="date" type="date" value={date} onChange={e => setDate(e.target.value)} onClick={(e) => e.currentTarget.showPicker()} required />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="startTime">Giờ bắt đầu</Label>
@@ -781,6 +868,161 @@ export default function Activities() {
                       placeholder="Chọn giờ kết thúc"
                     />
                   </div>
+                </div>
+
+                <div className="space-y-2 border-t pt-3 mt-3">
+                  <Label>Phạm vi sinh viên có thể tham gia</Label>
+                  <Select value={scopeType} onValueChange={(val: any) => setScopeType(val)}>
+                    <SelectTrigger id="scopeType"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Toàn trường</SelectItem>
+                      <SelectItem value="class">Theo Lớp</SelectItem>
+                      <SelectItem value="club">Theo Câu lạc bộ (CLB)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {scopeType === "class" && (
+                  <div className="space-y-1.5 mt-2">
+                    <Label>Chọn lớp áp dụng (chọn một hoặc nhiều)</Label>
+                    <Input
+                      type="text"
+                      placeholder="Tìm kiếm lớp..."
+                      value={classSearch}
+                      onChange={(e) => setClassSearch(e.target.value)}
+                      className="h-8 text-xs mb-1.5"
+                    />
+                    <div className="border rounded-md p-2 max-h-36 overflow-y-auto space-y-1.5 bg-background">
+                      {classList
+                        .filter(cls =>
+                          cls.name.toLowerCase().includes(classSearch.toLowerCase()) ||
+                          (cls.faculty && cls.faculty.toLowerCase().includes(classSearch.toLowerCase()))
+                        )
+                        .map(cls => (
+                          <div key={cls.id} className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id={`class-${cls.id}`}
+                              checked={selectedClasses.includes(cls.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedClasses([...selectedClasses, cls.id]);
+                                } else {
+                                  setSelectedClasses(selectedClasses.filter(id => id !== cls.id));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4"
+                            />
+                            <label htmlFor={`class-${cls.id}`} className="text-sm font-medium leading-none cursor-pointer">
+                              {cls.name} ({cls.faculty})
+                            </label>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {scopeType === "club" && (
+                  <div className="space-y-1.5 mt-2">
+                    <Label>Chọn Câu lạc bộ áp dụng (chọn một hoặc nhiều)</Label>
+                    <Input
+                      type="text"
+                      placeholder="Tìm kiếm câu lạc bộ..."
+                      value={clubSearch}
+                      onChange={(e) => setClubSearch(e.target.value)}
+                      className="h-8 text-xs mb-1.5"
+                    />
+                    <div className="border rounded-md p-2 max-h-36 overflow-y-auto space-y-1.5 bg-background">
+                      {clubList
+                        .filter(club =>
+                          club.name.toLowerCase().includes(clubSearch.toLowerCase())
+                        )
+                        .map(club => (
+                          <div key={club.id} className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id={`club-${club.id}`}
+                              checked={selectedClubs.includes(club.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedClubs([...selectedClubs, club.id]);
+                                } else {
+                                  setSelectedClubs(selectedClubs.filter(id => id !== club.id));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4"
+                            />
+                            <label htmlFor={`club-${club.id}`} className="text-sm font-medium leading-none cursor-pointer">
+                              {club.name}
+                            </label>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2 border-t pt-3 mt-3">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="isRegistrationRequired"
+                      checked={isRegistrationRequired}
+                      onChange={(e) => setIsRegistrationRequired(e.target.checked)}
+                      className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4"
+                    />
+                    <Label htmlFor="isRegistrationRequired" className="cursor-pointer text-sm font-medium">
+                      Cho phép sinh viên đăng ký trước?
+                    </Label>
+                  </div>
+
+                  {isRegistrationRequired && (
+                    <div className="grid grid-cols-2 gap-4 mt-2 p-3 bg-muted/40 rounded-lg animate-in fade-in-50 duration-200">
+                      <div className="space-y-1.5 col-span-2">
+                        <Label className="text-xs font-semibold">Bắt đầu đăng ký</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="date"
+                            value={registrationStartDate}
+                            onChange={(e) => setRegistrationStartDate(e.target.value)}
+                            onClick={(e) => e.currentTarget.showPicker()}
+                            required={isRegistrationRequired}
+                            className="h-9 text-xs"
+                          />
+                          <Input
+                            type="text"
+                            value={registrationStartTime}
+                            readOnly
+                            onClick={() => { setTimePickerTarget('regStart'); setIsTimePickerOpen(true); }}
+                            className="cursor-pointer font-mono h-9 text-xs"
+                            required={isRegistrationRequired}
+                            placeholder="Chọn giờ"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 col-span-2">
+                        <Label className="text-xs font-semibold">Kết thúc đăng ký</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="date"
+                            value={registrationEndDate}
+                            onChange={(e) => setRegistrationEndDate(e.target.value)}
+                            onClick={(e) => e.currentTarget.showPicker()}
+                            required={isRegistrationRequired}
+                            className="h-9 text-xs"
+                          />
+                          <Input
+                            type="text"
+                            value={registrationEndTime}
+                            readOnly
+                            onClick={() => { setTimePickerTarget('regEnd'); setIsTimePickerOpen(true); }}
+                            className="cursor-pointer font-mono h-9 text-xs"
+                            required={isRegistrationRequired}
+                            placeholder="Chọn giờ"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
@@ -1078,15 +1320,29 @@ export default function Activities() {
       <RadialTimePicker
         open={isTimePickerOpen}
         onClose={() => setIsTimePickerOpen(false)}
-        value={timePickerTarget === 'start' ? startTime : endTime}
+        value={
+          timePickerTarget === 'start' ? startTime :
+          timePickerTarget === 'end' ? endTime :
+          timePickerTarget === 'regStart' ? registrationStartTime :
+          registrationEndTime
+        }
         onChange={(val) => {
           if (timePickerTarget === 'start') {
             setStartTime(val);
-          } else {
+          } else if (timePickerTarget === 'end') {
             setEndTime(val);
+          } else if (timePickerTarget === 'regStart') {
+            setRegistrationStartTime(val);
+          } else if (timePickerTarget === 'regEnd') {
+            setRegistrationEndTime(val);
           }
         }}
-        title={timePickerTarget === 'start' ? "Chọn giờ bắt đầu" : "Chọn giờ kết thúc"}
+        title={
+          timePickerTarget === 'start' ? "Chọn giờ bắt đầu hoạt động" :
+          timePickerTarget === 'end' ? "Chọn giờ kết thúc hoạt động" :
+          timePickerTarget === 'regStart' ? "Chọn giờ bắt đầu đăng ký" :
+          "Chọn giờ kết thúc đăng ký"
+        }
       />
     </div>
   );

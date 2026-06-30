@@ -217,6 +217,14 @@ class Activity(models.Model):
     duration_minutes = models.IntegerField(default=180)
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
+    
+    # New scope and registration fields
+    scope_type = models.CharField(max_length=20, choices=(('all', 'Toàn trường'), ('class', 'Lớp'), ('club', 'CLB')), default='all')
+    allowed_classes = models.ManyToManyField(ClassInfo, blank=True, related_name='activities')
+    allowed_clubs = models.ManyToManyField(Organization, blank=True, related_name='activities')
+    is_registration_required = models.BooleanField(default=False)
+    registration_start = models.DateTimeField(null=True, blank=True)
+    registration_end = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'activity'

@@ -464,6 +464,34 @@ export default function ActivityDetail() {
                     <span className="font-bold text-primary">{isExternal ? activity.proposed_score : activity.points} điểm</span>
                   </div>
                 </div>
+                {!isExternal && (
+                  <>
+                    <div className="flex gap-2.5 items-start">
+                      <Users className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-xs text-muted-foreground block">Phạm vi đối tượng</span>
+                        <span className="font-semibold">
+                          {activity.scope_type === "class" ? "Giới hạn Lớp học" : activity.scope_type === "club" ? "Giới hạn CLB" : "Toàn trường"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2.5 items-start col-span-1 sm:col-span-2 border-t pt-3 mt-1">
+                      <Clock className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-xs text-muted-foreground block">Đăng ký trước</span>
+                        <span className="font-semibold text-xs">
+                          {activity.is_registration_required ? (
+                            <span className="text-amber-600 font-medium">
+                              Bắt buộc (từ {activity.registration_start ? new Date(activity.registration_start).toLocaleString('vi-VN') : "N/A"} đến {activity.registration_end ? new Date(activity.registration_end).toLocaleString('vi-VN') : "N/A"})
+                            </span>
+                          ) : (
+                            <span className="text-green-600 font-medium">Không yêu cầu đăng ký trước (có thể check-in trực tiếp)</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Internal checkins history */}
@@ -622,10 +650,10 @@ export default function ActivityDetail() {
                 <div className="flex flex-col gap-2 pt-2">
                   {isStudent && activity.status === "upcoming" && (
                     <>
-                      {!isRegistered && (
+                      {activity.is_registration_required && !isRegistered && (
                         <Button className="w-full bg-gradient-primary" onClick={registerActivity}>Đăng ký tham gia</Button>
                       )}
-                      {isRegistered && studentStatus === "registered" && (
+                      {(!activity.is_registration_required || isRegistered) && (studentStatus === "registered" || !studentStatus) && (
                         <div className="grid grid-cols-2 gap-2">
                           <Button
                             size="sm"

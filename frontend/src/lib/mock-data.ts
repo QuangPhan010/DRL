@@ -119,6 +119,12 @@ export interface Activity {
   duration_minutes?: number;
   start_time?: string;
   end_time?: string;
+  scope_type?: "all" | "class" | "club";
+  allowed_classes?: number[];
+  allowed_clubs?: number[];
+  is_registration_required?: boolean;
+  registration_start?: string;
+  registration_end?: string;
 }
 
 export interface ActivityCheckIn {

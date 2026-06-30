@@ -14,6 +14,7 @@ import Criteria from "./pages/Criteria";
 import SettingsPage from "./pages/Settings";
 import Activities from "./pages/Activities";
 import ActivityDetail from "./pages/ActivityDetail";
+import ActivityForm from "./pages/ActivityForm";
 import ClassReview from "./pages/ClassReview";
 import DataSync from "./pages/DataSync";
 import Classes from "./pages/Classes";
@@ -39,7 +40,9 @@ const App = () => (
               <Route path="/criteria" element={<Criteria />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/activities" element={<Activities />} />
+              <Route path="/activities/create" element={<ActivityForm />} />
               <Route path="/activities/:id" element={<ActivityDetail />} />
+              <Route path="/activities/:id/edit" element={<ActivityForm />} />
               <Route path="/class-review" element={<ClassReview />} />
               <Route path="/data-sync" element={<DataSync />} />
             </Route>

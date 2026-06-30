@@ -632,6 +632,22 @@ class ActivityViewSet(viewsets.ModelViewSet):
         student_id = request.data.get('studentId') or request.data.get('student_id')
         student = get_object_or_404(Student, student_id=student_id)
         
+        # 1. Validate Scope
+        if activity.scope_type == 'class':
+            if not student.class_info or not activity.allowed_classes.filter(id=student.class_info.id).exists():
+                return Response({'error': 'Lớp của bạn không nằm trong phạm vi tham gia hoạt động này.'}, status=status.HTTP_400_BAD_REQUEST)
+        elif activity.scope_type == 'club':
+            if not student.user or not student.user.user_organizations.filter(organization__in=activity.allowed_clubs.all()).exists():
+                return Response({'error': 'Bạn không thuộc câu lạc bộ (CLB) được phép tham gia hoạt động này.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Validate Pre-registration Time
+        if activity.is_registration_required:
+            now = timezone.now()
+            if activity.registration_start and now < activity.registration_start:
+                return Response({'error': 'Thời gian đăng ký tham gia hoạt động chưa bắt đầu.'}, status=status.HTTP_400_BAD_REQUEST)
+            if activity.registration_end and now > activity.registration_end:
+                return Response({'error': 'Thời gian đăng ký tham gia hoạt động đã kết thúc.'}, status=status.HTTP_400_BAD_REQUEST)
+
         participant, created = ActivityParticipant.objects.get_or_create(
             activity=activity, student=student,
             defaults={'status': 'registered'}
@@ -686,6 +702,15 @@ class ActivityViewSet(viewsets.ModelViewSet):
         if not hasattr(request.user, 'student_profile') or not request.user.student_profile:
             return Response({'error': 'Tài khoản không phải là sinh viên hoặc không có hồ sơ sinh viên'}, status=status.HTTP_400_BAD_REQUEST)
         student = request.user.student_profile
+
+        # Check registration requirement
+        has_registered = ActivityParticipant.objects.filter(activity=activity, student=student).exists()
+        if activity.is_registration_required and not has_registered:
+            return Response({'error': 'Bạn cần đăng ký trước để tham gia hoạt động này.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Auto-register student if registration is not required
+        if not activity.is_registration_required and not has_registered:
+            ActivityParticipant.objects.create(activity=activity, student=student, status='registered')
         
         # Check check-in timing (UTC+7 / Asia/Ho_Chi_Minh)
         import datetime
@@ -913,8 +938,11 @@ class ActivityViewSet(viewsets.ModelViewSet):
 
         # Update Participant status to 'attended' if completed
         if is_completed:
-            participant = ActivityParticipant.objects.filter(activity=activity, student=student).first()
-            if participant:
+            participant, _ = ActivityParticipant.objects.get_or_create(
+                activity=activity, student=student,
+                defaults={'status': 'attended'}
+            )
+            if participant.status != 'attended':
                 participant.status = 'attended'
                 participant.save()
 

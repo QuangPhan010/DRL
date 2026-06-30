@@ -143,7 +143,7 @@ class ActivitySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Activity
-        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'check_in_time', 'selfie_resubmit_requested', 'start_time', 'end_time')
+        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'check_in_time', 'selfie_resubmit_requested', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end')
 
     def get_check_in_time(self, obj):
         request = self.context.get('request')
