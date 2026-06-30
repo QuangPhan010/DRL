@@ -526,7 +526,7 @@ export default function ExternalActivities() {
                   Không có hoạt động ngoài trường nào.
                 </div>
               ) : (
-                <Table>
+                <Table className="min-w-[800px]">
                   <TableHeader>
                     <TableRow className="bg-muted/30">
                       {!isStudent && <TableHead>Sinh viên</TableHead>}

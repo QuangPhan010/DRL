@@ -221,7 +221,7 @@ export default function ClassReview() {
           <CardDescription>Học kỳ 1 năm học 2024-2025</CardDescription>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table>
+          <Table className="min-w-[750px]">
             <TableHeader>
               <TableRow className="bg-muted/30">
                 <TableHead>Sinh viên</TableHead>

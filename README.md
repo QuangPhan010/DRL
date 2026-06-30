@@ -1,0 +1,39 @@
+# ITC Point - Hệ thống Quản lý Điểm Rèn luyện Sinh viên
+
+Hệ thống quản lý điểm rèn luyện sinh viên (ITC Point) là dự án web hiện đại bao gồm phần Backend phát triển bằng **Django (Python)** và Frontend phát triển bằng **React, TypeScript & Tailwind CSS (Vite)**.
+
+---
+
+## 🛠️ Hướng dẫn cài đặt và Khởi chạy Dự án
+
+### 1. Chuẩn bị môi trường
+Yêu cầu hệ thống đã cài đặt sẵn:
+- **Python 3.10+**
+- **Node.js 18+** & **pnpm** (hoặc npm/yarn)
+
+---
+
+### 2. Khởi chạy Django Backend
+
+Di chuyển vào thư mục dự án chứa file `requirements.txt`:
+```bash
+# Cài đặt các thư viện cần thiết
+pip install -r requirements.txt
+```
+
+### 3. Khởi chạy React Frontend (Vite)
+
+Mở một cửa sổ Terminal mới:
+
+```bash
+cd frontend
+
+# Cài đặt các package dependencies bằng pnpm (hoặc npm install)
+pnpm install
+
+# Khởi chạy ứng dụng ở chế độ development
+pnpm dev
+```
+Frontend sẽ chạy tại: [http://localhost:5173/](http://localhost:5173/)
+
+---

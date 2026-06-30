@@ -113,7 +113,7 @@ export default function Approvals() {
   const renderTable = (items: any[]) => (
     <Card className="border-0 shadow-md">
       <CardContent className="p-0 overflow-x-auto">
-        <Table>
+        <Table className="min-w-[800px]">
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
               <TableHead>Sinh viên</TableHead>
@@ -188,7 +188,7 @@ export default function Approvals() {
         </div>
 
         {isAffairs && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="gap-2 border-primary/20" onClick={handleExportReport}>
               <FileDown className="h-4 w-4" />Xuất báo cáo chính thức
             </Button>

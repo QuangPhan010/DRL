@@ -434,7 +434,7 @@ export default function Classes() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
             {/* Khoa */}
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground font-semibold">Khoa</Label>
@@ -507,7 +507,7 @@ export default function Classes() {
           </div>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table>
+          <Table className="min-w-[800px]">
             <TableHeader>
               <TableRow className="bg-muted/30 hover:bg-muted/30">
                 <TableHead>Tên lớp</TableHead>
@@ -716,7 +716,7 @@ export default function Classes() {
           </DialogHeader>
           
           <div className="flex-1 overflow-y-auto my-4 border rounded-lg">
-            <Table>
+            <Table className="min-w-[700px]">
               <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
                   <TableHead>Mã SV</TableHead>

@@ -265,7 +265,7 @@ export default function Criteria() {
           <CardDescription>Cấu hình các mức xếp loại rèn luyện tương ứng tổng điểm</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             {classifications.map(c => (
               <div key={c.name} className={`rounded-xl p-4 bg-gradient-to-br ${c.color} text-white shadow-md`}>
                 <p className="font-display font-bold text-lg">{c.name}</p>

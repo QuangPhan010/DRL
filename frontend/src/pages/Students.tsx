@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { Plus, Search, Edit, Trash2, Filter, Download, Users as UsersIcon } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Filter, Download, Users as UsersIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +30,7 @@ const empty: Omit<Student, "id"> = {
 
 export default function Students() {
   const { user } = useAuth();
+  const [isImporting, setIsImporting] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState("");
   const [facultyFilter, setFacultyFilter] = useState("all");
@@ -151,6 +152,9 @@ export default function Students() {
     const formData = new FormData();
     formData.append("file", file);
 
+    setIsImporting(true);
+    const toastId = toast.loading("Đang đọc và phân tích file Excel sinh viên, vui lòng đợi...");
+
     try {
       const res = await fetch(`${API_URL}/students/import-excel/`, {
         method: "POST",
@@ -161,18 +165,19 @@ export default function Students() {
         const data = await res.json();
         const createdCount = data.created_count !== undefined ? data.created_count : 0;
         if (createdCount === 0) {
-          toast.warning("File xử lý thành công nhưng không có sinh viên mới nào được thêm. Vui lòng kiểm tra xem tiêu đề các cột (Mã SV, Họ và tên, Email) đã khớp chưa hoặc dữ liệu đã tồn tại.");
+          toast.warning("File xử lý thành công nhưng không có sinh viên mới nào được thêm. Vui lòng kiểm tra tiêu đề cột hoặc dữ liệu trùng.", { id: toastId });
         } else {
-          toast.success(`Nhập thành công ${createdCount} sinh viên mới!`);
+          toast.success(`Nhập thành công ${createdCount} sinh viên mới!`, { id: toastId });
         }
         fetchStudents();
       } else {
         const data = await res.json();
-        toast.error(data.error || "Không thể nhập danh sách sinh viên");
+        toast.error(data.error || "Không thể nhập danh sách sinh viên", { id: toastId });
       }
     } catch (err) {
-      toast.error("Lỗi kết nối máy chủ");
+      toast.error("Lỗi kết nối máy chủ", { id: toastId });
     } finally {
+      setIsImporting(false);
       e.target.value = "";
     }
   };
@@ -307,7 +312,7 @@ export default function Students() {
           </p>
         </div>
         {!isMonitor && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {canImportExcel && (
               <>
                 <input
@@ -332,7 +337,13 @@ export default function Students() {
         )}
       </div>
 
-      <Card className="border-0 shadow-md">
+      <Card className="border-0 shadow-md relative overflow-hidden">
+        {isImporting && (
+          <div className="absolute inset-0 bg-background/60 backdrop-blur-[1px] z-50 flex flex-col items-center justify-center gap-2">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            <p className="text-sm font-semibold text-primary">Đang tải và xử lý dữ liệu Excel...</p>
+          </div>
+        )}
         <CardHeader className="border-b bg-muted/10 space-y-4">
           <div className="flex flex-col lg:flex-row gap-3">
             <div className="relative flex-1">
@@ -342,7 +353,7 @@ export default function Students() {
           </div>
           
           {!isMonitor && (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-2">
               {/* Khoa */}
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground font-semibold">Khoa</Label>
@@ -429,76 +440,137 @@ export default function Students() {
             </div>
           )}
         </CardHeader>
-        <CardContent className="p-0 overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30 hover:bg-muted/30">
-                <TableHead>Mã SV</TableHead>
-                <TableHead>Họ và tên</TableHead>
-                <TableHead className="hidden md:table-cell">Lớp</TableHead>
-                <TableHead className="hidden lg:table-cell">Khoa</TableHead>
-                <TableHead className="hidden md:table-cell">Giới tính</TableHead>
-                <TableHead className="hidden lg:table-cell">Email</TableHead>
-                {!isMonitor && <TableHead className="text-right">Thao tác</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedStudents.map(s => {
-                const major = getStudentMajor(s.studentId, s.faculty || "", s.className);
-                const program = getStudentProgram(s.studentId, s.faculty || "", major, s.className);
-                const level = getStudentLevel(s.studentId, program, s.className);
-                const club = getStudentClub(s.studentId);
-
-                return (
-                  <TableRow key={s.id} className="hover:bg-muted/30">
-                    <TableCell className="font-mono font-medium">{s.studentId}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full bg-gradient-primary text-primary-foreground flex items-center justify-center text-xs font-semibold shrink-0">
-                          {s.fullName.split(" ").slice(-1)[0][0]}
-                        </div>
-                        <div>
-                          <div className="font-medium text-sm">{s.fullName}</div>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {s.className ? <Badge variant="secondary">{s.className}</Badge> : <span className="text-muted-foreground text-xs italic">Chưa xếp lớp</span>}
-                    </TableCell>
-                  <TableCell className="hidden lg:table-cell text-muted-foreground">{s.faculty}</TableCell>
-                  <TableCell className="hidden md:table-cell">{s.gender}</TableCell>
-                  <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">{s.email}</TableCell>
-                  {!isMonitor && (
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(s)}><Edit className="h-4 w-4" /></Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Xóa sinh viên?</AlertDialogTitle>
-                              <AlertDialogDescription>Bạn có chắc muốn xóa {s.fullName} ({s.studentId})? Hành động này không thể hoàn tác.</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Hủy</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => remove(s.id)} className="bg-destructive hover:bg-destructive/90">Xóa</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </TableCell>
-                  )}
+        {/* Table View for Large Screens */}
+        <div className="hidden lg:block">
+          <CardContent className="p-0 overflow-x-auto">
+            <Table className="min-w-[800px]">
+              <TableHeader>
+                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                  <TableHead>Mã SV</TableHead>
+                  <TableHead>Họ và tên</TableHead>
+                  <TableHead className="hidden md:table-cell">Lớp</TableHead>
+                  <TableHead className="hidden lg:table-cell">Khoa</TableHead>
+                  <TableHead className="hidden md:table-cell">Giới tính</TableHead>
+                  <TableHead className="hidden lg:table-cell">Email</TableHead>
+                  {!isMonitor && <TableHead className="text-right">Thao tác</TableHead>}
                 </TableRow>
-              );
-            })}
-              {filtered.length === 0 && (
-                <TableRow><TableCell colSpan={isMonitor ? 6 : 7} className="text-center py-12 text-muted-foreground">Không tìm thấy sinh viên nào</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
+              </TableHeader>
+              <TableBody>
+                {paginatedStudents.map(s => {
+                  return (
+                    <TableRow key={s.id} className="hover:bg-muted/30">
+                      <TableCell className="font-mono font-medium">{s.studentId}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 rounded-full bg-gradient-primary text-primary-foreground flex items-center justify-center text-xs font-semibold shrink-0">
+                            {s.fullName.split(" ").slice(-1)[0][0]}
+                          </div>
+                          <div>
+                            <div className="font-medium text-sm">{s.fullName}</div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {s.className ? <Badge variant="secondary">{s.className}</Badge> : <span className="text-muted-foreground text-xs italic">Chưa xếp lớp</span>}
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell text-muted-foreground">{s.faculty}</TableCell>
+                      <TableCell className="hidden md:table-cell">{s.gender}</TableCell>
+                      <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">{s.email}</TableCell>
+                      {!isMonitor && (
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => openEdit(s)}><Edit className="h-4 w-4" /></Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Xóa sinh viên?</AlertDialogTitle>
+                                  <AlertDialogDescription>Bạn có chắc muốn xóa {s.fullName} ({s.studentId})? Hành động này không thể hoàn tác.</AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Hủy</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => remove(s.id)} className="bg-destructive hover:bg-destructive/90">Xóa</AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <TableRow><TableCell colSpan={isMonitor ? 6 : 7} className="text-center py-12 text-muted-foreground">Không tìm thấy sinh viên nào</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </div>
+
+        {/* Card View for Mobile/Tablet Screens */}
+        <div className="lg:hidden p-4 space-y-4">
+          {paginatedStudents.map(s => {
+            return (
+              <div key={s.id} className="p-4 rounded-xl border bg-card hover:bg-muted/10 transition-colors space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-gradient-primary text-primary-foreground flex items-center justify-center text-sm font-semibold shrink-0">
+                      {s.fullName.split(" ").slice(-1)[0][0]}
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-sm">{s.fullName}</h4>
+                      <p className="font-mono text-xs text-muted-foreground">{s.studentId}</p>
+                    </div>
+                  </div>
+                  {!isMonitor && (
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(s)} className="h-8 w-8"><Edit className="h-4 w-4" /></Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Xóa sinh viên?</AlertDialogTitle>
+                            <AlertDialogDescription>Bạn có chắc muốn xóa {s.fullName} ({s.studentId})? Hành động này không thể hoàn tác.</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Hủy</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => remove(s.id)} className="bg-destructive hover:bg-destructive/90">Xóa</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t text-xs">
+                  <div>
+                    <span className="text-muted-foreground block">Lớp:</span>
+                    {s.className ? <Badge variant="secondary" className="mt-0.5">{s.className}</Badge> : <span className="text-muted-foreground italic">Chưa xếp lớp</span>}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Giới tính:</span>
+                    <span className="font-medium">{s.gender}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground block">Khoa:</span>
+                    <span className="font-medium">{s.faculty}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground block">Email:</span>
+                    <span className="font-medium text-primary truncate block" title={s.email}>{s.email}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {filtered.length === 0 && (
+            <p className="text-center py-6 text-muted-foreground text-sm">Không tìm thấy sinh viên nào</p>
+          )}
+        </div>
         <div className="p-4 border-t flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground bg-muted/5">
           <span>Hiển thị <span className="font-semibold text-foreground">{filtered.length === 0 ? 0 : (currentPage - 1) * ITEMS_PER_PAGE + 1}</span> - <span className="font-semibold text-foreground">{Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)}</span> trong số <span className="font-semibold text-foreground">{filtered.length}</span> sinh viên</span>
           

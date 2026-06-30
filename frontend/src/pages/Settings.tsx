@@ -249,7 +249,7 @@ export default function SettingsPage() {
 
         {/* Roles and Permissions Section */}
         <Card className="border-0 shadow-md lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4">
             <div>
               <CardTitle className="font-display flex items-center gap-2">
                 <Shield className="h-5 w-5 text-primary" /> Quản lý tài khoản và Phân quyền
@@ -258,12 +258,12 @@ export default function SettingsPage() {
                 Tạo tài khoản mới, cấp mật khẩu ngẫu nhiên, reset mật khẩu, kích hoạt hoặc khóa tài khoản hệ thống.
               </CardDescription>
             </div>
-            <Button onClick={handleAddClick} className="bg-gradient-primary gap-2 text-xs">
+            <Button onClick={handleAddClick} className="bg-gradient-primary gap-2 text-xs w-fit">
               <Plus className="h-4 w-4" />Thêm tài khoản mới
             </Button>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
-            <Table>
+            <Table className="min-w-[800px]">
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
                   <TableHead>Họ và tên</TableHead>

@@ -475,7 +475,7 @@ export default function ActivityDetail() {
                     </h3>
                   </div>
 
-                  <Table>
+                  <Table className="min-w-[700px]">
                     <TableHeader>
                       <TableRow className="bg-muted/30">
                         <TableHead>Mã SV</TableHead>

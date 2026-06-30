@@ -134,7 +134,7 @@ export default function DataSync() {
           <CardDescription>GPA quy đổi từ hệ điểm 4 sang điểm rèn luyện tương ứng</CardDescription>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table>
+          <Table className="min-w-[850px]">
             <TableHeader>
               <TableRow className="bg-muted/30">
                 <TableHead>Mã SV</TableHead>
