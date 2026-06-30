@@ -843,7 +843,10 @@ export default function Activities() {
       {/* Dialog: Submit Evidence */}
       <Dialog open={isEvidenceOpen} onOpenChange={setIsEvidenceOpen}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-display">Nộp minh chứng hoạt động</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-display">Nộp minh chứng hoạt động</DialogTitle>
+            <DialogDescription className="sr-only">Nộp tệp tin hoặc hình ảnh minh chứng để được ghi nhận điểm rèn luyện.</DialogDescription>
+          </DialogHeader>
           <form onSubmit={submitEvidence} className="space-y-4">
             <div className="p-3 rounded-lg bg-muted/40 text-sm">
               <p className="font-semibold text-primary">{selectedActivity?.title}</p>
@@ -866,7 +869,7 @@ export default function Activities() {
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-auto">
           <DialogHeader>
             <DialogTitle className="font-display">Danh sách tham gia hoạt động</DialogTitle>
-            <CardDescription>{selectedActivity?.title} ({selectedActivity?.date})</CardDescription>
+            <DialogDescription>{selectedActivity?.title} ({selectedActivity?.date})</DialogDescription>
           </DialogHeader>
           {selectedActivity && (
             <div className="space-y-4">
@@ -1074,7 +1077,7 @@ export default function Activities() {
 
       <RadialTimePicker
         open={isTimePickerOpen}
-        onClose={() => setIsTixmePickerOpen(false)}
+        onClose={() => setIsTimePickerOpen(false)}
         value={timePickerTarget === 'start' ? startTime : endTime}
         onChange={(val) => {
           if (timePickerTarget === 'start') {
@@ -1258,11 +1261,9 @@ export function RadialTimePicker({ open, onClose, value, onChange, title = "Ch�
   }
   const indicatorCoords = getCoords(activeAngleVal, activeMaxVal, activeRadius);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-[320px] p-0 overflow-hidden rounded-3xl border shadow-2xl bg-background animate-in fade-in zoom-in duration-200">
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-[320px] p-0 overflow-hidden rounded-3xl border shadow-2xl bg-background gap-0" aria-describedby={undefined}>
         {/* Header/Title */}
         <div className="p-4 pt-5 pb-2 text-sm font-semibold text-muted-foreground text-center">
           {title}
@@ -1327,7 +1328,7 @@ export function RadialTimePicker({ open, onClose, value, onChange, title = "Ch�
           <Button type="button" variant="ghost" onClick={onClose} className="text-xs px-4 h-9">Hủy</Button>
           <Button type="button" onClick={handleOK} className="bg-primary text-white text-xs px-5 h-9 rounded-xl">OK</Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
