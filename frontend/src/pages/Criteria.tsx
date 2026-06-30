@@ -42,6 +42,8 @@ export default function Criteria() {
           groups: c.groups ? c.groups.map((g: any) => ({
             id: g.id.toString(),
             name: g.name,
+            isSingleChoice: g.is_single_choice || false,
+            is_single_choice: g.is_single_choice || false,
             subItems: g.subItems ? g.subItems.map((s: any) => ({
               id: s.id.toString(),
               name: s.name,
@@ -97,10 +99,15 @@ export default function Criteria() {
     const newGroup: GroupCriterion = {
       id: `g-${Date.now()}`,
       name: `Nhóm tiêu chí mới ${groups.length + 1}`,
+      isSingleChoice: false,
       subItems: []
     };
     setGroups([...groups, newGroup]);
     toast.success("Đã thêm nhóm tiêu chí con");
+  };
+
+  const toggleGroupSingleChoice = (gId: string, val: boolean) => {
+    setGroups(groups.map(g => g.id === gId ? { ...g, isSingleChoice: val } : g));
   };
 
   const updateGroupName = (gId: string, newName: string) => {
@@ -164,34 +171,22 @@ export default function Criteria() {
   const save = async () => {
     if (!name) { toast.error("Vui lòng nhập tên tiêu chí lớn"); return; }
     
-    // Auto-calculate parent maxScore based on positive scores in subitems
-    let calculatedMaxScore = maxScore;
-    let hasSubItems = false;
-    let sum = 0;
-    
+    // Parse raw string state to number in subitems
     groups.forEach(g => {
       g.subItems.forEach(s => {
-        hasSubItems = true;
-        // Parse raw string state to number
         const sScore = typeof s.maxScore === "string" ? (parseInt(s.maxScore) || 0) : s.maxScore;
         s.maxScore = sScore;
-        if (sScore > 0) {
-          sum += sScore;
-        }
       });
     });
-
-    if (hasSubItems) {
-      calculatedMaxScore = sum;
-    }
 
     const payload = {
       code,
       name,
-      maxScore: calculatedMaxScore,
+      maxScore,
       description,
       groups: groups.map(g => ({
         name: g.name,
+        isSingleChoice: g.isSingleChoice || false,
         subItems: g.subItems.map(s => ({
           name: s.name,
           maxScore: s.maxScore
@@ -312,7 +307,14 @@ export default function Criteria() {
                     <div className="space-y-4 pl-12 pt-2 border-l border-primary/10 ml-5">
                       {c.groups?.map(g => (
                         <div key={g.id} className="space-y-2">
-                          <p className="text-xs font-bold text-primary uppercase tracking-wider">{g.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-bold text-primary uppercase tracking-wider">{g.name}</p>
+                            {(g.isSingleChoice || g.is_single_choice) && (
+                              <Badge variant="outline" className="text-[10px] h-5 px-1.5 bg-amber-50 text-amber-600 border-amber-200">
+                                Chỉ chọn 1 option
+                              </Badge>
+                            )}
+                          </div>
                           <div className="space-y-1.5 pl-3 border-l-2 border-muted">
                             {g.subItems.map(s => (
                               <div key={s.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/40 text-sm">
@@ -363,8 +365,8 @@ export default function Criteria() {
                 <Input value={code} onChange={e => setCode(e.target.value)} placeholder="Ví dụ: I" />
               </div>
               <div className="space-y-2 col-span-2">
-                <Label>Điểm tối đa mục (Tự tính nếu có mục con)</Label>
-                <Input type="number" disabled={groups.some(g => g.subItems.length > 0)} value={groups.some(g => g.subItems.length > 0) ? groups.reduce((acc, g) => acc + g.subItems.reduce((sacc, s) => s.maxScore > 0 ? sacc + s.maxScore : sacc, 0), 0) : maxScore} onChange={e => setMaxScore(parseInt(e.target.value) || 0)} />
+                <Label>Điểm tối đa mục (Cấp 1)</Label>
+                <Input type="number" value={maxScore} onChange={e => setMaxScore(parseInt(e.target.value) || 0)} />
               </div>
             </div>
             <div className="space-y-2">
@@ -397,6 +399,18 @@ export default function Criteria() {
                     <div className="space-y-1.5 w-[85%]">
                       <Label className="text-xs text-primary font-semibold">Tên nhóm tiêu chí con (Cấp 2)</Label>
                       <Input value={g.name} onChange={e => updateGroupName(g.id, e.target.value)} className="h-9 font-semibold" placeholder="1. Tinh thần vượt khó..." />
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="checkbox"
+                          id={`single-choice-${g.id}`}
+                          checked={g.isSingleChoice || false}
+                          onChange={e => toggleGroupSingleChoice(g.id, e.target.checked)}
+                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                        />
+                        <label htmlFor={`single-choice-${g.id}`} className="text-xs text-muted-foreground cursor-pointer select-none">
+                          Chỉ chọn 1 option (tiêu chí cấp 3)
+                        </label>
+                      </div>
                     </div>
 
                     {/* Level 3 items */}

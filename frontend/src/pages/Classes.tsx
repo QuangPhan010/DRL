@@ -12,6 +12,13 @@ import { Label } from "@/components/ui/label";
 import { facultiesList, Student, ClassInfo } from "@/lib/mock-data";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import {
+  FACULTY_HIERARCHY,
+  ALL_COHORTS,
+  ALL_LEVELS,
+  parseClassName,
+  getFacultyData,
+} from "@/lib/filter-utils";
 
 export default function Classes() {
   const { user, allUsers, fetchUsers } = useAuth();
@@ -24,13 +31,84 @@ export default function Classes() {
   // Filters
   const [search, setSearch] = useState("");
   const [facultyFilter, setFacultyFilter] = useState("all");
+  const [majorFilter, setMajorFilter] = useState("all");
+  const [heFilter, setHeFilter] = useState("all");
+  const [cohortFilter, setCohortFilter] = useState("all");
+  const [levelFilter, setLevelFilter] = useState("all");
+
+  // Dynamically extract unique values from database records
+  const dynamicFaculties = useMemo(() => {
+    return Array.from(new Set(classes.map(c => c.faculty).filter(Boolean)));
+  }, [classes]);
+
+  const availableMajors = useMemo(() => {
+    const allUniqueMajors = Array.from(new Set(classes.map(c => parseClassName(c.name).major).filter(Boolean)));
+    if (facultyFilter === "all") {
+      return allUniqueMajors;
+    }
+    const facultyData = getFacultyData(facultyFilter);
+    if (!facultyData) return [];
+    const allowed = facultyData.majors.map(m => m.name.toLowerCase().trim());
+    return allUniqueMajors.filter(m => allowed.includes(m.toLowerCase().trim()));
+  }, [classes, facultyFilter]);
+
+  const availablePrograms = useMemo(() => {
+    const allUniquePrograms = Array.from(new Set(classes.map(c => parseClassName(c.name).program).filter(Boolean)));
+
+    if (majorFilter === "all") {
+      if (facultyFilter !== "all") {
+        const facultyData = getFacultyData(facultyFilter);
+        if (facultyData) {
+          const allowedProgs: string[] = [];
+          facultyData.majors.forEach(m => {
+            m.programs.forEach(p => {
+              if (!allowedProgs.includes(p)) allowedProgs.push(p);
+            });
+          });
+          return allUniquePrograms.filter(p => allowedProgs.map(ap => ap.toLowerCase().trim()).includes(p.toLowerCase().trim()));
+        }
+      }
+      return allUniquePrograms;
+    }
+
+    let foundMajor: any = null;
+    for (const f of FACULTY_HIERARCHY) {
+      const m = f.majors.find(maj => maj.name.toLowerCase().trim() === majorFilter.toLowerCase().trim());
+      if (m) {
+        foundMajor = m;
+        break;
+      }
+    }
+    if (!foundMajor) return [];
+    const allowed = foundMajor.programs.map((p: string) => p.toLowerCase().trim());
+    return allUniquePrograms.filter(p => allowed.includes(p.toLowerCase().trim()));
+  }, [classes, facultyFilter, majorFilter]);
+
+  const cohortsList = useMemo(() => {
+    return Array.from(new Set(classes.map(c => c.cohort).filter(Boolean))).sort();
+  }, [classes]);
+
+  const levelsList = useMemo(() => {
+    return Array.from(new Set(classes.map(c => parseClassName(c.name).level).filter(Boolean)));
+  }, [classes]);
+
+  const handleFacultyChange = (val: string) => {
+    setFacultyFilter(val);
+    setMajorFilter("all");
+    setHeFilter("all");
+  };
+
+  const handleMajorChange = (val: string) => {
+    setMajorFilter(val);
+    setHeFilter("all");
+  };
   
   // Dialog controls
   const [isClassDialogOpen, setIsClassDialogOpen] = useState(false);
   const [editingClass, setEditingClass] = useState<ClassInfo | null>(null);
   const [classForm, setClassForm] = useState<Omit<ClassInfo, "id">>({
     name: "",
-    faculty: facultiesList[0],
+    faculty: "Công nghệ Thông tin",
     cohort: "K20",
     advisorId: "",
   });
@@ -117,10 +195,24 @@ export default function Classes() {
       }
       const q = search.toLowerCase();
       const matchQ = !q || c.name.toLowerCase().includes(q) || c.faculty.toLowerCase().includes(q);
-      const matchF = facultyFilter === "all" || c.faculty === facultyFilter;
-      return matchQ && matchF;
+      const matchF = facultyFilter === "all" || (c.faculty && c.faculty.toLowerCase().trim() === facultyFilter.toLowerCase().trim());
+      
+      const parsed = parseClassName(c.name);
+      
+      const major = parsed.major;
+      const matchMajor = majorFilter === "all" || major.toLowerCase().trim() === majorFilter.toLowerCase().trim();
+
+      const program = parsed.program;
+      const matchHe = heFilter === "all" || program.toLowerCase().trim() === heFilter.toLowerCase().trim();
+
+      const matchCohort = cohortFilter === "all" || c.cohort === cohortFilter;
+
+      const level = parsed.level;
+      const matchLevel = levelFilter === "all" || level.toLowerCase().trim() === levelFilter.toLowerCase().trim();
+
+      return matchQ && matchF && matchMajor && matchHe && matchCohort && matchLevel;
     });
-  }, [classes, search, facultyFilter, isAdvisor, user]);
+  }, [classes, search, facultyFilter, majorFilter, heFilter, cohortFilter, levelFilter, isAdvisor, user]);
 
   // Students in selected class
   const classStudents = useMemo(() => {
@@ -357,7 +449,7 @@ export default function Classes() {
       </div>
 
       <Card className="border-0 shadow-md">
-        <CardHeader className="border-b">
+        <CardHeader className="border-b bg-muted/10 space-y-4">
           <div className="flex flex-col lg:flex-row gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -365,18 +457,78 @@ export default function Classes() {
                 placeholder="Tìm theo tên lớp, khoa..." 
                 value={search} 
                 onChange={e => setSearch(e.target.value)} 
-                className="pl-9" 
+                className="pl-9 bg-background" 
               />
             </div>
-            <div className="flex gap-3">
-              <Select value={facultyFilter} onValueChange={setFacultyFilter}>
-                <SelectTrigger className="w-full lg:w-56">
-                  <Filter className="h-4 w-4 mr-1" />
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
+            {/* Khoa */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground font-semibold">Khoa</Label>
+              <Select value={facultyFilter} onValueChange={handleFacultyChange}>
+                <SelectTrigger className="w-full text-xs h-9 bg-background">
                   <SelectValue placeholder="Khoa" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tất cả khoa</SelectItem>
-                  {facultiesList.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                  {dynamicFaculties.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Ngành */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground font-semibold">Ngành</Label>
+              <Select value={majorFilter} onValueChange={handleMajorChange}>
+                <SelectTrigger className="w-full text-xs h-9 bg-background">
+                  <SelectValue placeholder="Ngành" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tất cả ngành</SelectItem>
+                  {availableMajors.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Hệ */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground font-semibold">Hệ đào tạo</Label>
+              <Select value={heFilter} onValueChange={setHeFilter}>
+                <SelectTrigger className="w-full text-xs h-9 bg-background">
+                  <SelectValue placeholder="Hệ" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tất cả hệ</SelectItem>
+                  {availablePrograms.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Khóa */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground font-semibold">Khóa</Label>
+              <Select value={cohortFilter} onValueChange={setCohortFilter}>
+                <SelectTrigger className="w-full text-xs h-9 bg-background">
+                  <SelectValue placeholder="Khóa" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tất cả khóa</SelectItem>
+                  {cohortsList.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Bậc */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground font-semibold">Bậc đào tạo</Label>
+              <Select value={levelFilter} onValueChange={setLevelFilter}>
+                <SelectTrigger className="w-full text-xs h-9 bg-background">
+                  <SelectValue placeholder="Bậc" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tất cả bậc</SelectItem>
+                  {levelsList.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -398,9 +550,27 @@ export default function Classes() {
               {filteredClasses.map(c => {
                 const classSize = students.filter(s => s.className === c.name).length;
                 const advisor = advisors.find(a => a.id === c.advisorId);
+                const parsed = parseClassName(c.name);
+                const major = parsed.major;
+                const program = parsed.program;
+                const level = parsed.level;
+
                 return (
                   <TableRow key={c.id} className="hover:bg-muted/30">
-                    <TableCell className="font-semibold">{c.name}</TableCell>
+                    <TableCell>
+                      <div className="font-semibold text-sm">{c.name}</div>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
+                          {major}
+                        </Badge>
+                        <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
+                          {program}
+                        </Badge>
+                        <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
+                          {level}
+                        </Badge>
+                      </div>
+                    </TableCell>
                     <TableCell>{c.faculty}</TableCell>
                     <TableCell><Badge variant="secondary">{c.cohort}</Badge></TableCell>
                     <TableCell className="font-medium">{classSize} sinh viên</TableCell>

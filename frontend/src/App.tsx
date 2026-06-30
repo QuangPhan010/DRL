@@ -8,7 +8,6 @@ import AppLayout from "@/components/layout/AppLayout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Students from "./pages/Students";
-import Evaluations from "./pages/Evaluations";
 import Approvals from "./pages/Approvals";
 import MyScores from "./pages/MyScores";
 import Criteria from "./pages/Criteria";
@@ -18,7 +17,6 @@ import ActivityDetail from "./pages/ActivityDetail";
 import ClassReview from "./pages/ClassReview";
 import DataSync from "./pages/DataSync";
 import Classes from "./pages/Classes";
-import FraudDashboard from "./pages/FraudDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,7 +34,6 @@ const App = () => (
               <Route path="/" element={<Dashboard />} />
               <Route path="/students" element={<Students />} />
               <Route path="/classes" element={<Classes />} />
-              <Route path="/evaluations" element={<Evaluations />} />
               <Route path="/approvals" element={<Approvals />} />
               <Route path="/my-scores" element={<MyScores />} />
               <Route path="/criteria" element={<Criteria />} />
@@ -45,7 +42,6 @@ const App = () => (
               <Route path="/activities/:id" element={<ActivityDetail />} />
               <Route path="/class-review" element={<ClassReview />} />
               <Route path="/data-sync" element={<DataSync />} />
-              <Route path="/fraud-monitor" element={<FraudDashboard />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

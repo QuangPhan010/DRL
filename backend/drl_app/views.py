@@ -241,6 +241,18 @@ class StudentViewSet(viewsets.ModelViewSet):
                     for idx, cell in enumerate(row):
                         if cell:
                             header_map[str(cell).strip().lower()] = idx
+                    
+                    # Validate headers
+                    required_id_terms = ['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien', 'mssv', 'mã số sinh viên', 'ma so sinh vien']
+                    required_name_terms = ['họ và tên', 'ho va ten', 'full name', 'fullname', 'tên', 'ten', 'họ tên', 'ho ten']
+                    
+                    has_id = any(term in header_map for term in required_id_terms)
+                    has_name = any(term in header_map for term in required_name_terms)
+                    
+                    if not (has_id and has_name):
+                        return Response({
+                            'error': f"Không tìm thấy cột bắt buộc 'Mã SV' hoặc 'Họ và tên'. Vui lòng kiểm tra lại dòng tiêu đề cột. Tiêu đề hiện tại trong file: {list(header_map.keys())}"
+                        }, status=status.HTTP_400_BAD_REQUEST)
                     continue
                 
                 # Skip completely empty rows
@@ -256,17 +268,21 @@ class StudentViewSet(viewsets.ModelViewSet):
                                 return str(val).strip() if val is not None else ''
                     return ''
 
-                student_id = get_val(['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien'])
-                full_name = get_val(['họ và tên', 'ho va ten', 'full name', 'fullname', 'tên', 'ten'])
-                email = get_val(['email', 'thư điện tử', 'thu dien tu'])
-                class_name = get_val(['lớp', 'lop', 'class', 'class name', 'class_name'])
+                student_id = get_val(['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien', 'mssv', 'mã số sinh viên', 'ma so sinh vien'])
+                full_name = get_val(['họ và tên', 'ho va ten', 'full name', 'fullname', 'tên', 'ten', 'họ tên', 'ho ten'])
+                email = get_val(['email', 'thư điện tử', 'thu dien tu', 'hòm thư', 'hom thu'])
+                class_name = get_val(['lớp', 'lop', 'class', 'class name', 'class_name', 'lớp sinh hoạt', 'lop sinh hoat'])
                 faculty = get_val(['khoa', 'faculty', 'khoa đào tạo', 'khoa dao tao']) or 'Công nghệ Thông tin'
-                cohort = get_val(['khóa', 'khoa', 'cohort', 'niên khóa', 'nien khoa']) or 'K20'
-                gender = get_val(['giới tính', 'gioi tinh', 'gender']) or 'Nam'
-                phone = get_val(['số điện thoại', 'so dien thoai', 'phone', 'sđt', 'sdt'])
+                cohort = get_val(['khóa', 'khoa', 'cohort', 'niên khóa', 'nien khoa', 'niên khoá']) or 'K20'
+                gender = get_val(['giới tính', 'gioi tinh', 'gender', 'phái', 'phai']) or 'Nam'
+                phone = get_val(['số điện thoại', 'so dien thoai', 'phone', 'sđt', 'sdt', 'điện thoại', 'dien thoai'])
 
-                if not student_id or not full_name or not email:
+                if not student_id or not full_name:
                     continue
+
+                # Auto-generate fallback email if missing
+                if not email:
+                    email = f"{student_id.lower()}@stu.itc.edu.vn"
 
                 # Find or create class
                 from .models import ClassInfo
@@ -281,9 +297,10 @@ class StudentViewSet(viewsets.ModelViewSet):
                 if not student_obj:
                     user_obj = User.objects.filter(student_id=student_id).first()
                     if not user_obj:
+                        user_obj = User.objects.filter(username__iexact=student_id).first()
+                    
+                    if not user_obj:
                         username = student_id.lower()
-                        if User.objects.filter(username=username).exists():
-                            username = f"{username}_{random.randint(1000, 9999)}"
                         random_password = generate_random_password()
                         user_obj = User.objects.create_user(
                             username=username,
@@ -295,6 +312,11 @@ class StudentViewSet(viewsets.ModelViewSet):
                             is_first_login=True,
                             plain_password=random_password
                         )
+                    else:
+                        # Update student_id on existing User if missing
+                        if not user_obj.student_id:
+                            user_obj.student_id = student_id
+                            user_obj.save()
 
                     Student.objects.create(
                         user=user_obj,
@@ -437,7 +459,8 @@ class CriterionViewSet(viewsets.ModelViewSet):
         for g in groups_data:
             group = GroupCriterion.objects.create(
                 criterion=criterion,
-                name=g.get('name', '')
+                name=g.get('name', ''),
+                is_single_choice=g.get('isSingleChoice') or g.get('is_single_choice', False)
             )
             for s in g.get('subItems', []):
                 SubItem.objects.create(
@@ -463,7 +486,8 @@ class CriterionViewSet(viewsets.ModelViewSet):
             for g in groups_data:
                 group = GroupCriterion.objects.create(
                     criterion=criterion,
-                    name=g.get('name', '')
+                    name=g.get('name', ''),
+                    is_single_choice=g.get('isSingleChoice') or g.get('is_single_choice', False)
                 )
                 for s in g.get('subItems', []):
                     SubItem.objects.create(

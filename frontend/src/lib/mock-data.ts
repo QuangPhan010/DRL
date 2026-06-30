@@ -70,6 +70,8 @@ export interface SubItem {
 export interface GroupCriterion {
   id: string;
   name: string;
+  is_single_choice?: boolean;
+  isSingleChoice?: boolean;
   subItems: SubItem[];
 }
 

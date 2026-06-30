@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, MapPin, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,20 @@ export default function Activities() {
   const { user } = useAuth();
   const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const [activities, setActivities] = useState<Activity[]>([]);
+
+  const parseDateTime = (dateStr?: string, timeStr?: string) => {
+    if (!dateStr || !timeStr) return null;
+    const parts = dateStr.split('-');
+    const timeParts = timeStr.split(':');
+    return new Date(
+      Number(parts[0]),
+      Number(parts[1]) - 1,
+      Number(parts[2]),
+      Number(timeParts[0]),
+      Number(timeParts[1]),
+      timeParts[2] ? Number(timeParts[2]) : 0
+    );
+  };
   const [criteria, setCriteria] = useState<any[]>(mockCriteria);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const handleOpenCreateChange = (open: boolean) => {
@@ -47,6 +61,10 @@ export default function Activities() {
   const [evidenceUrl, setEvidenceUrl] = useState("");
   const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Time picker states
+  const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
+  const [timePickerTarget, setTimePickerTarget] = useState<'start' | 'end'>('start');
 
   // Simulation states
   const [isQrOpen, setIsQrOpen] = useState(false);
@@ -564,14 +582,34 @@ export default function Activities() {
               const studentStatus = act.participants.find(p => p.studentId === user?.studentId)?.status;
               const criterion = criteria.find(c => c.id === act.criterionId);
 
+              const start = parseDateTime(act.date, act.start_time);
+              const end = parseDateTime(act.date, act.end_time);
+              const now = new Date();
+              const isOngoing = act.status !== "completed" && start && end && now >= start && now <= end;
+              const isEnded = act.status !== "completed" && end && now > end;
+
               return (
                 <Card key={act.id} className="border-0 shadow-md bg-gradient-card flex flex-col justify-between">
                   <CardHeader>
                     <div className="flex justify-between items-start gap-2">
                       <Badge className="bg-primary/10 text-primary border-primary/20">{criterion?.name || "Tiêu chí"}</Badge>
-                      <Badge variant={act.status === "completed" ? "secondary" : "default"} className={act.status === "completed" ? "bg-success/15 text-success hover:bg-success/20 border-0" : "bg-warning/15 text-warning hover:bg-warning/20 border-0 text-black dark:text-white"}>
-                        {act.status === "completed" ? "Đã hoàn thành" : "Sắp diễn ra"}
-                      </Badge>
+                      {act.status === "completed" ? (
+                        <Badge variant="secondary" className="bg-success/15 text-success hover:bg-success/20 border-0">
+                          Đã hoàn thành
+                        </Badge>
+                      ) : isOngoing ? (
+                        <Badge variant="default" className="bg-orange-500/15 text-orange-500 hover:bg-orange-500/20 border-0">
+                          Đang diễn ra
+                        </Badge>
+                      ) : isEnded ? (
+                        <Badge variant="default" className="bg-red-500/15 text-red-500 hover:bg-red-500/20 border-0">
+                          Đã kết thúc
+                        </Badge>
+                      ) : (
+                        <Badge variant="default" className="bg-warning/15 text-warning hover:bg-warning/20 border-0 text-black dark:text-white">
+                          Sắp diễn ra
+                        </Badge>
+                      )}
                     </div>
                     <CardTitle className="font-display text-lg font-bold mt-3 leading-snug line-clamp-2 cursor-pointer hover:text-primary transition-colors flex items-center justify-between gap-1.5" onClick={() => navigate(`/activities/${act.id}`)}>
                       <span>{act.title}</span>
@@ -604,26 +642,7 @@ export default function Activities() {
                           {!isRegistered && act.status === "upcoming" && (
                             <Button size="sm" onClick={() => registerActivity(act.id)}>Đăng ký</Button>
                           )}
-                          {isRegistered && studentStatus === "registered" && (
-                            <div className="flex gap-1.5">
-                              <Button
-                                size="xs"
-                                onClick={() => openCheckInSim(act)}
-                                disabled={!!act.check_in_time && !act.selfie_resubmit_requested}
-                                className="bg-success hover:bg-success/90 text-white text-xs h-8 px-2.5 disabled:opacity-60"
-                              >
-                                <MapPin className="h-3.5 w-3.5" /> {act.selfie_resubmit_requested ? "Bổ sung Selfie" : (act.check_in_time ? "Đã Check-in" : "Check-in GPS")}
-                              </Button>
-                              <Button
-                                size="xs"
-                                onClick={() => openCheckOutSim(act)}
-                                disabled={!getCheckoutStatus(act).enabled}
-                                className="bg-warning hover:bg-warning/90 text-black dark:text-white text-xs h-8 px-2.5 disabled:opacity-60"
-                              >
-                                <MapPin className="h-3.5 w-3.5" /> {getCheckoutStatus(act).text}
-                              </Button>
-                            </div>
-                          )}
+                          {/* Check-in/out buttons hidden here - handled inside detail page */}
                           {studentStatus === "attended" && (
                             <Badge variant="outline" className="bg-success/5 text-success">Đã tham gia</Badge>
                           )}
@@ -649,10 +668,10 @@ export default function Activities() {
                             </Button>
                           </div>
                           <div className="flex gap-1.5">
-                            <Button size="xs" variant="outline" className="h-8 px-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => openEditActivity(act)}>
+                            <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => openEditActivity(act)}>
                               Sửa
                             </Button>
-                            <Button size="xs" variant="outline" className="h-8 px-2 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleDeleteActivity(act.id)}>
+                            <Button size="xs" className="h-8 px-2 text-red-600 border border-red-200 bg-transparent hover:bg-red-50 hover:text-red-700 transition-colors" onClick={() => handleDeleteActivity(act.id)}>
                               Xóa
                             </Button>
                           </div>
@@ -738,11 +757,29 @@ export default function Activities() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="startTime">Giờ bắt đầu</Label>
-                    <Input id="startTime" type="time" value={startTime} onChange={e => setStartTime(e.target.value)} required />
+                    <Input
+                      id="startTime"
+                      type="text"
+                      value={startTime}
+                      readOnly
+                      onClick={() => { setTimePickerTarget('start'); setIsTimePickerOpen(true); }}
+                      className="cursor-pointer font-mono"
+                      required
+                      placeholder="Chọn giờ bắt đầu"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="endTime">Giờ kết thúc</Label>
-                    <Input id="endTime" type="time" value={endTime} onChange={e => setEndTime(e.target.value)} required />
+                    <Input
+                      id="endTime"
+                      type="text"
+                      value={endTime}
+                      readOnly
+                      onClick={() => { setTimePickerTarget('end'); setIsTimePickerOpen(true); }}
+                      className="cursor-pointer font-mono"
+                      required
+                      placeholder="Chọn giờ kết thúc"
+                    />
                   </div>
                 </div>
               </>
@@ -1034,6 +1071,263 @@ export default function Activities() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <RadialTimePicker
+        open={isTimePickerOpen}
+        onClose={() => setIsTixmePickerOpen(false)}
+        value={timePickerTarget === 'start' ? startTime : endTime}
+        onChange={(val) => {
+          if (timePickerTarget === 'start') {
+            setStartTime(val);
+          } else {
+            setEndTime(val);
+          }
+        }}
+        title={timePickerTarget === 'start' ? "Chọn giờ bắt đầu" : "Chọn giờ kết thúc"}
+      />
+    </div>
+  );
+}
+
+interface RadialTimePickerProps {
+  open: boolean;
+  onClose: () => void;
+  value: string; // "HH:MM"
+  onChange: (value: string) => void;
+  title?: string;
+}
+
+export function RadialTimePicker({ open, onClose, value, onChange, title = "Chọn giờ" }: RadialTimePickerProps) {
+  const [mode, setMode] = useState<'hour' | 'minute'>('hour');
+  const [selectedHour, setSelectedHour] = useState(6);
+  const [selectedMinute, setSelectedMinute] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  useEffect(() => {
+    if (value) {
+      const [h, m] = value.split(':').map(Number);
+      setSelectedHour(isNaN(h) ? 6 : h);
+      setSelectedMinute(isNaN(m) ? 0 : m);
+    }
+    setMode('hour');
+  }, [value, open]);
+
+  const handleOK = () => {
+    const hh = selectedHour.toString().padStart(2, '0');
+    const mm = selectedMinute.toString().padStart(2, '0');
+    onChange(`${hh}:${mm}`);
+    onClose();
+  };
+
+  const updateTimeFromCoords = (clientX: number, clientY: number) => {
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const x = clientX - cx;
+    const y = clientY - cy;
+    const distance = Math.sqrt(x * x + y * y);
+    
+    // Calculate angle in radians, offset by -90 deg (top is 0)
+    let angle = Math.atan2(y, x) + Math.PI / 2;
+    if (angle < 0) angle += 2 * Math.PI;
+
+    if (mode === 'hour') {
+      const isInner = distance < 68; // Inner circle for 12-23
+      let hour = Math.round(angle * 12 / (2 * Math.PI)) % 12;
+      if (isInner) {
+        hour = hour === 0 ? 12 : hour + 12;
+      } else {
+        if (hour === 0) hour = 0;
+      }
+      setSelectedHour(hour);
+    } else {
+      let minute = Math.round(angle * 12 / (2 * Math.PI)) * 5 % 60;
+      setSelectedMinute(minute);
+    }
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+    updateTimeFromCoords(e.clientX, e.clientY);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (isDragging) {
+      e.preventDefault();
+      updateTimeFromCoords(e.clientX, e.clientY);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (isDragging) {
+      setIsDragging(false);
+      if (mode === 'hour') {
+        setMode('minute');
+      }
+    }
+  };
+
+  // Coordinates helpers
+  const getCoords = (val: number, max: number, r: number) => {
+    const angle = (val * 2 * Math.PI / max) - Math.PI / 2;
+    return {
+      x: 120 + r * Math.cos(angle),
+      y: 120 + r * Math.sin(angle)
+    };
+  };
+
+  // Render hour dial items
+  const renderHourNumbers = () => {
+    const numbers = [];
+    // Outer circle (0-11)
+    for (let i = 0; i < 12; i++) {
+      const coords = getCoords(i, 12, 85);
+      numbers.push(
+        <text
+          key={`out-${i}`}
+          x={coords.x}
+          y={coords.y + 4}
+          textAnchor="middle"
+          className={`text-[11px] font-semibold cursor-pointer select-none transition-all ${selectedHour === i ? 'fill-white' : 'fill-muted-foreground hover:fill-foreground'}`}
+          onClick={() => setSelectedHour(i)}
+        >
+          {i === 0 ? '0' : i}
+        </text>
+      );
+    }
+    // Inner circle (12-23)
+    for (let i = 12; i < 24; i++) {
+      const coords = getCoords(i - 12, 12, 52);
+      numbers.push(
+        <text
+          key={`in-${i}`}
+          x={coords.x}
+          y={coords.y + 4}
+          textAnchor="middle"
+          className={`text-[10px] font-medium cursor-pointer select-none transition-all ${selectedHour === i ? 'fill-white' : 'fill-muted-foreground hover:fill-foreground'}`}
+          onClick={() => setSelectedHour(i)}
+        >
+          {i}
+        </text>
+      );
+    }
+    return numbers;
+  };
+
+  // Render minute dial items
+  const renderMinuteNumbers = () => {
+    const numbers = [];
+    for (let i = 0; i < 60; i += 5) {
+      const coords = getCoords(i, 60, 85);
+      numbers.push(
+        <text
+          key={`min-${i}`}
+          x={coords.x}
+          y={coords.y + 4}
+          textAnchor="middle"
+          className={`text-[11px] font-semibold cursor-pointer select-none transition-all ${selectedMinute === i ? 'fill-white' : 'fill-muted-foreground hover:fill-foreground'}`}
+          onClick={() => setSelectedMinute(i)}
+        >
+          {i === 0 ? '00' : i.toString().padStart(2, '0')}
+        </text>
+      );
+    }
+    return numbers;
+  };
+
+  // Calculate indicator position
+  let activeRadius = 85;
+  let activeAngleVal = 0;
+  let activeMaxVal = 12;
+  if (mode === 'hour') {
+    if (selectedHour >= 12) {
+      activeRadius = 52;
+      activeAngleVal = selectedHour - 12;
+    } else {
+      activeRadius = 85;
+      activeAngleVal = selectedHour;
+    }
+    activeMaxVal = 12;
+  } else {
+    activeRadius = 85;
+    activeAngleVal = selectedMinute;
+    activeMaxVal = 60;
+  }
+  const indicatorCoords = getCoords(activeAngleVal, activeMaxVal, activeRadius);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-[320px] p-0 overflow-hidden rounded-3xl border shadow-2xl bg-background animate-in fade-in zoom-in duration-200">
+        {/* Header/Title */}
+        <div className="p-4 pt-5 pb-2 text-sm font-semibold text-muted-foreground text-center">
+          {title}
+        </div>
+
+        {/* Time display panel */}
+        <div className="flex justify-center items-center gap-2 px-6 py-4 bg-muted/20 border-y">
+          <button
+            type="button"
+            onClick={() => setMode('hour')}
+            className={`px-5 py-3 rounded-2xl text-4xl font-bold transition-all ${
+              mode === 'hour'
+                ? 'bg-primary/10 text-primary'
+                : 'bg-muted/40 text-muted-foreground hover:bg-muted/80'
+            }`}
+          >
+            {selectedHour.toString().padStart(2, '0')}
+          </button>
+          <span className="text-3xl font-bold text-muted-foreground">:</span>
+          <button
+            type="button"
+            onClick={() => setMode('minute')}
+            className={`px-5 py-3 rounded-2xl text-4xl font-bold transition-all ${
+              mode === 'minute'
+                ? 'bg-primary/10 text-primary'
+                : 'bg-muted/40 text-muted-foreground hover:bg-muted/80'
+            }`}
+          >
+            {selectedMinute.toString().padStart(2, '0')}
+          </button>
+        </div>
+
+        {/* Radial Dial Wheel */}
+        <div className="flex justify-center items-center py-6 bg-background">
+          <div className="relative w-[240px] h-[240px] rounded-full bg-muted/30 shadow-inner flex items-center justify-center">
+            <svg
+              ref={svgRef}
+              width="240"
+              height="240"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              className="absolute inset-0 cursor-crosshair touch-none select-none"
+            >
+              {/* Dial Center point */}
+              <circle cx="120" cy="120" r="4" fill="var(--primary)" />
+              
+              {/* Connecting arm line */}
+              <line x1="120" y1="120" x2={indicatorCoords.x} y2={indicatorCoords.y} stroke="var(--primary)" strokeWidth="2.5" />
+              
+              {/* Outer selector ring overlay */}
+              <circle cx={indicatorCoords.x} cy={indicatorCoords.y} r="15" fill="var(--primary)" />
+              
+              {/* Dial numbers */}
+              {mode === 'hour' ? renderHourNumbers() : renderMinuteNumbers()}
+            </svg>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex justify-end gap-3 p-4 bg-muted/20 border-t">
+          <Button type="button" variant="ghost" onClick={onClose} className="text-xs px-4 h-9">Hủy</Button>
+          <Button type="button" onClick={handleOK} className="bg-primary text-white text-xs px-5 h-9 rounded-xl">OK</Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -12,9 +12,20 @@ import { Label } from "@/components/ui/label";
 import { facultiesList, Student } from "@/lib/mock-data";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import {
+  FACULTY_HIERARCHY,
+  ALL_COHORTS,
+  ALL_LEVELS,
+  ALL_CLUBS,
+  getStudentMajor,
+  getStudentProgram,
+  getStudentLevel,
+  getStudentClub,
+  getFacultyData
+} from "@/lib/filter-utils";
 
 const empty: Omit<Student, "id"> = {
-  studentId: "", fullName: "", email: "", className: "none", faculty: facultiesList[0], cohort: "K20", gender: "Nam", phone: "",
+  studentId: "", fullName: "", email: "", className: "none", faculty: "Công nghệ Thông tin", cohort: "K20", gender: "Nam", phone: "",
 };
 
 export default function Students() {
@@ -23,11 +34,94 @@ export default function Students() {
   const [search, setSearch] = useState("");
   const [facultyFilter, setFacultyFilter] = useState("all");
   const [classFilter, setClassFilter] = useState("all");
+  const [majorFilter, setMajorFilter] = useState("all");
+  const [heFilter, setHeFilter] = useState("all");
+  const [cohortFilter, setCohortFilter] = useState("all");
+  const [levelFilter, setLevelFilter] = useState("all");
+  const [clbFilter, setClbFilter] = useState("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
   const [form, setForm] = useState<Omit<Student, "id">>(empty);
 
   const isMonitor = user?.role === "class_monitor";
+
+  // Dynamically extract unique values from database records
+  const dynamicFaculties = useMemo(() => {
+    return Array.from(new Set(students.map(s => s.faculty).filter(Boolean)));
+  }, [students]);
+
+  const availableMajors = useMemo(() => {
+    const allUniqueMajors = Array.from(new Set(students.map(s => getStudentMajor(s.studentId, s.faculty, s.className)).filter(Boolean)));
+    if (facultyFilter === "all") {
+      return allUniqueMajors;
+    }
+    const facultyData = getFacultyData(facultyFilter);
+    if (!facultyData) return [];
+    const allowed = facultyData.majors.map(m => m.name.toLowerCase().trim());
+    return allUniqueMajors.filter(m => allowed.includes(m.toLowerCase().trim()));
+  }, [students, facultyFilter]);
+
+  const availablePrograms = useMemo(() => {
+    const allUniquePrograms = Array.from(new Set(students.map(s => {
+      const major = getStudentMajor(s.studentId, s.faculty, s.className);
+      return getStudentProgram(s.studentId, s.faculty, major, s.className);
+    }).filter(Boolean)));
+
+    if (majorFilter === "all") {
+      if (facultyFilter !== "all") {
+        const facultyData = getFacultyData(facultyFilter);
+        if (facultyData) {
+          const allowedProgs: string[] = [];
+          facultyData.majors.forEach(m => {
+            m.programs.forEach(p => {
+              if (!allowedProgs.includes(p)) allowedProgs.push(p);
+            });
+          });
+          return allUniquePrograms.filter(p => allowedProgs.map(ap => ap.toLowerCase().trim()).includes(p.toLowerCase().trim()));
+        }
+      }
+      return allUniquePrograms;
+    }
+
+    let foundMajor: any = null;
+    for (const f of FACULTY_HIERARCHY) {
+      const m = f.majors.find(maj => maj.name.toLowerCase().trim() === majorFilter.toLowerCase().trim());
+      if (m) {
+        foundMajor = m;
+        break;
+      }
+    }
+    if (!foundMajor) return [];
+    const allowed = foundMajor.programs.map((p: string) => p.toLowerCase().trim());
+    return allUniquePrograms.filter(p => allowed.includes(p.toLowerCase().trim()));
+  }, [students, facultyFilter, majorFilter]);
+
+  const cohortsList = useMemo(() => {
+    return Array.from(new Set(students.map(s => s.cohort).filter(Boolean))).sort();
+  }, [students]);
+
+  const levelsList = useMemo(() => {
+    return Array.from(new Set(students.map(s => {
+      const major = getStudentMajor(s.studentId, s.faculty, s.className);
+      const program = getStudentProgram(s.studentId, s.faculty, major, s.className);
+      return getStudentLevel(s.studentId, program, s.className);
+    }).filter(Boolean)));
+  }, [students]);
+
+  const clubsList = useMemo(() => {
+    return Array.from(new Set(students.map(s => getStudentClub(s.studentId)).filter(Boolean)));
+  }, [students]);
+
+  const handleFacultyChange = (val: string) => {
+    setFacultyFilter(val);
+    setMajorFilter("all");
+    setHeFilter("all");
+  };
+
+  const handleMajorChange = (val: string) => {
+    setMajorFilter(val);
+    setHeFilter("all");
+  };
 
   const fetchStudents = async () => {
     try {
@@ -89,7 +183,12 @@ export default function Students() {
 
       if (res.ok) {
         const data = await res.json();
-        toast.success(data.message || "Nhập danh sách sinh viên thành công!");
+        const createdCount = data.created_count !== undefined ? data.created_count : 0;
+        if (createdCount === 0) {
+          toast.warning("File xử lý thành công nhưng không có sinh viên mới nào được thêm. Vui lòng kiểm tra xem tiêu đề các cột (Mã SV, Họ và tên, Email) đã khớp chưa hoặc dữ liệu đã tồn tại.");
+        } else {
+          toast.success(`Nhập thành công ${createdCount} sinh viên mới!`);
+        }
         fetchStudents();
       } else {
         const data = await res.json();
@@ -123,8 +222,23 @@ export default function Students() {
     const matchQ = !q || s.fullName.toLowerCase().includes(q) || s.studentId.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
     const matchF = facultyFilter === "all" || (s.faculty && s.faculty.toLowerCase().trim() === facultyFilter.toLowerCase().trim());
     const matchC = classFilter === "all" || s.className === classFilter;
-    return matchQ && matchF && matchC;
-  }), [students, search, facultyFilter, classFilter, isMonitor, monitorClassName]);
+    
+    const major = getStudentMajor(s.studentId, s.faculty || "", s.className);
+    const matchMajor = majorFilter === "all" || major.toLowerCase().trim() === majorFilter.toLowerCase().trim();
+
+    const program = getStudentProgram(s.studentId, s.faculty || "", major, s.className);
+    const matchHe = heFilter === "all" || program.toLowerCase().trim() === heFilter.toLowerCase().trim();
+
+    const matchCohort = cohortFilter === "all" || s.cohort === cohortFilter;
+
+    const level = getStudentLevel(s.studentId, program, s.className);
+    const matchLevel = levelFilter === "all" || level.toLowerCase().trim() === levelFilter.toLowerCase().trim();
+
+    const club = getStudentClub(s.studentId);
+    const matchCLB = clbFilter === "all" || club.toLowerCase().trim() === clbFilter.toLowerCase().trim();
+
+    return matchQ && matchF && matchC && matchMajor && matchHe && matchCohort && matchLevel && matchCLB;
+  }), [students, search, facultyFilter, classFilter, majorFilter, heFilter, cohortFilter, levelFilter, clbFilter, isMonitor, monitorClassName]);
 
   const openCreate = () => { setEditing(null); setForm(empty); setOpen(true); };
   const openEdit = (s: Student) => { setEditing(s); setForm(s); setOpen(true); };
@@ -236,31 +350,101 @@ export default function Students() {
       </div>
 
       <Card className="border-0 shadow-md">
-        <CardHeader className="border-b">
+        <CardHeader className="border-b bg-muted/10 space-y-4">
           <div className="flex flex-col lg:flex-row gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Tìm theo tên, mã SV, email..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+              <Input placeholder="Tìm theo tên, mã SV, email..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 bg-background" />
             </div>
-            {!isMonitor && (
-              <div className="flex gap-3">
-                <Select value={facultyFilter} onValueChange={setFacultyFilter}>
-                  <SelectTrigger className="w-full lg:w-56"><Filter className="h-4 w-4 mr-1" /><SelectValue placeholder="Khoa" /></SelectTrigger>
+          </div>
+          
+          {!isMonitor && (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-2">
+              {/* Khoa */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground font-semibold">Khoa</Label>
+                <Select value={facultyFilter} onValueChange={handleFacultyChange}>
+                  <SelectTrigger className="w-full text-xs h-9 bg-background">
+                    <SelectValue placeholder="Khoa" />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Tất cả khoa</SelectItem>
-                    {facultiesList.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={classFilter} onValueChange={setClassFilter}>
-                  <SelectTrigger className="w-full lg:w-40"><SelectValue placeholder="Lớp" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tất cả lớp</SelectItem>
-                    {dbClasses.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                    {dynamicFaculties.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-            )}
-          </div>
+
+              {/* Ngành */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground font-semibold">Ngành</Label>
+                <Select value={majorFilter} onValueChange={handleMajorChange}>
+                  <SelectTrigger className="w-full text-xs h-9 bg-background">
+                    <SelectValue placeholder="Ngành" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả ngành</SelectItem>
+                    {availableMajors.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Hệ */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground font-semibold">Hệ đào tạo</Label>
+                <Select value={heFilter} onValueChange={setHeFilter}>
+                  <SelectTrigger className="w-full text-xs h-9 bg-background">
+                    <SelectValue placeholder="Hệ" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả hệ</SelectItem>
+                    {availablePrograms.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Khóa */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground font-semibold">Khóa</Label>
+                <Select value={cohortFilter} onValueChange={setCohortFilter}>
+                  <SelectTrigger className="w-full text-xs h-9 bg-background">
+                    <SelectValue placeholder="Khóa" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả khóa</SelectItem>
+                    {cohortsList.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Bậc */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground font-semibold">Bậc đào tạo</Label>
+                <Select value={levelFilter} onValueChange={setLevelFilter}>
+                  <SelectTrigger className="w-full text-xs h-9 bg-background">
+                    <SelectValue placeholder="Bậc" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả bậc</SelectItem>
+                    {levelsList.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* CLB */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground font-semibold">Câu lạc bộ</Label>
+                <Select value={clbFilter} onValueChange={setClbFilter}>
+                  <SelectTrigger className="w-full text-xs h-9 bg-background">
+                    <SelectValue placeholder="Câu lạc bộ" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả CLB</SelectItem>
+                    {clubsList.map(club => <SelectItem key={club} value={club}>{club}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <Table>
@@ -276,20 +460,42 @@ export default function Students() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map(s => (
-                <TableRow key={s.id} className="hover:bg-muted/30">
-                  <TableCell className="font-mono font-medium">{s.studentId}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full bg-gradient-primary text-primary-foreground flex items-center justify-center text-xs font-semibold">
-                        {s.fullName.split(" ").slice(-1)[0][0]}
+              {filtered.map(s => {
+                const major = getStudentMajor(s.studentId, s.faculty || "", s.className);
+                const program = getStudentProgram(s.studentId, s.faculty || "", major, s.className);
+                const level = getStudentLevel(s.studentId, program, s.className);
+                const club = getStudentClub(s.studentId);
+
+                return (
+                  <TableRow key={s.id} className="hover:bg-muted/30">
+                    <TableCell className="font-mono font-medium">{s.studentId}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-full bg-gradient-primary text-primary-foreground flex items-center justify-center text-xs font-semibold shrink-0">
+                          {s.fullName.split(" ").slice(-1)[0][0]}
+                        </div>
+                        <div>
+                          <div className="font-medium text-sm">{s.fullName}</div>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
+                              {major}
+                            </Badge>
+                            <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
+                              {program}
+                            </Badge>
+                            <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
+                              {level}
+                            </Badge>
+                            <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
+                              {club}
+                            </Badge>
+                          </div>
+                        </div>
                       </div>
-                      <span className="font-medium">{s.fullName}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {s.className ? <Badge variant="secondary">{s.className}</Badge> : <span className="text-muted-foreground text-xs italic">Chưa xếp lớp</span>}
-                  </TableCell>
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {s.className ? <Badge variant="secondary">{s.className}</Badge> : <span className="text-muted-foreground text-xs italic">Chưa xếp lớp</span>}
+                    </TableCell>
                   <TableCell className="hidden lg:table-cell text-muted-foreground">{s.faculty}</TableCell>
                   <TableCell className="hidden md:table-cell">{s.gender}</TableCell>
                   <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">{s.email}</TableCell>
@@ -316,7 +522,8 @@ export default function Students() {
                     </TableCell>
                   )}
                 </TableRow>
-              ))}
+              );
+            })}
               {filtered.length === 0 && (
                 <TableRow><TableCell colSpan={isMonitor ? 6 : 7} className="text-center py-12 text-muted-foreground">Không tìm thấy sinh viên nào</TableCell></TableRow>
               )}

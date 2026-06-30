@@ -67,7 +67,7 @@ class GroupCriterionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GroupCriterion
-        fields = ('id', 'name', 'subItems')
+        fields = ('id', 'name', 'is_single_choice', 'subItems')
 
 class CriterionSerializer(serializers.ModelSerializer):
     groups = GroupCriterionSerializer(many=True, read_only=True)

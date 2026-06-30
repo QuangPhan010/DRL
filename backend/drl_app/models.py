@@ -147,6 +147,7 @@ class Criterion(models.Model):
 class GroupCriterion(models.Model):
     criterion = models.ForeignKey(Criterion, on_delete=models.CASCADE, related_name='groups')
     name = models.CharField(max_length=255)
+    is_single_choice = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'group_criterion'

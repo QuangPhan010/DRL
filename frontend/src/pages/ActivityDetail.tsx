@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { CalendarDays, ArrowLeft, Award, Users, CheckCircle2, Clock, MapPin, Building, ShieldAlert, FileText, QrCode, Trash2, Eye, Shield, Check, X, AlertTriangle } from "lucide-react";
+import { CalendarDays, ArrowLeft, Award, Users, CheckCircle2, Clock, MapPin, Building, ShieldAlert, FileText, QrCode, Trash2, Eye, Shield, Check, X, AlertTriangle, Camera, Image } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -39,6 +39,86 @@ export default function ActivityDetail() {
   const [simLon, setSimLon] = useState("106.771200");
   const [simSelfie, setSimSelfie] = useState("selfie_sv_in.png");
   const [simDeviceId, setSimDeviceId] = useState("device_" + (user?.studentId || "SV001"));
+
+  // Selfie camera & upload state
+  const [selfiePreviewUrl, setSelfiePreviewUrl] = useState<string | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      setMediaStream(stream);
+      setCameraActive(true);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 100);
+    } catch (err) {
+      console.error(err);
+      toast.error("Không thể truy cập camera. Vui lòng cấp quyền hoặc sử dụng tải ảnh.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => track.stop());
+      setMediaStream(null);
+    }
+    setCameraActive(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement("canvas");
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 480;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/png");
+        setSelfiePreviewUrl(dataUrl);
+        setSimSelfie(`captured_${Date.now()}.png`);
+        stopCamera();
+      }
+    }
+  };
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSimSelfie(file.name);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelfiePreviewUrl(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Auto GPS updater
+  useEffect(() => {
+    if (isCheckInSimOpen || isCheckOutSimOpen) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            setSimLat(position.coords.latitude.toFixed(6));
+            setSimLon(position.coords.longitude.toFixed(6));
+            toast.success("Đã tự động định vị vị trí GPS thực tế!");
+          },
+          (error) => {
+            console.error(error);
+            toast.warning("Không thể lấy GPS thực tế. Sử dụng tọa độ mặc định.");
+          }
+        );
+      }
+    } else {
+      stopCamera();
+      setSelfiePreviewUrl(null);
+    }
+  }, [isCheckInSimOpen, isCheckOutSimOpen]);
 
   const fetchDetail = async () => {
     try {
@@ -239,6 +319,16 @@ export default function ActivityDetail() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "upcoming":
+        if (!isExternal && activity) {
+          const start = parseDateTime(activity.date, activity.start_time);
+          const end = parseDateTime(activity.date, activity.end_time);
+          const now = new Date();
+          if (start && end && now >= start && now <= end) {
+            return <Badge className="bg-orange-500 text-white">Đang diễn ra</Badge>;
+          } else if (end && now > end) {
+            return <Badge className="bg-red-500 text-white">Đã kết thúc</Badge>;
+          }
+        }
         return <Badge className="bg-blue-500 text-white">Sắp diễn ra</Badge>;
       case "completed":
         return <Badge className="bg-green-600 text-white">Đã hoàn thành</Badge>;
@@ -510,21 +600,23 @@ export default function ActivityDetail() {
               <CardHeader className="pb-3 border-b"><CardTitle className="font-display text-lg">Hành động & GPS</CardTitle></CardHeader>
               <CardContent className="pt-4 space-y-4 text-xs">
                 {/* GPS Coordinates Simulation */}
-                <div className="bg-muted/30 p-3 rounded-xl border border-dashed space-y-2">
-                  <span className="font-bold text-muted-foreground uppercase text-[10px] block">Tọa độ định vị chuẩn</span>
-                  <div className="flex justify-between">
-                    <span>Vĩ độ (Latitude):</span>
-                    <span className="font-mono font-bold text-primary">{activity.latitude || "10.850100"}</span>
+                {!isStudent && (
+                  <div className="bg-muted/30 p-3 rounded-xl border border-dashed space-y-2">
+                    <span className="font-bold text-muted-foreground uppercase text-[10px] block">Tọa độ định vị chuẩn</span>
+                    <div className="flex justify-between">
+                      <span>Vĩ độ (Latitude):</span>
+                      <span className="font-mono font-bold text-primary">{activity.latitude || "10.850100"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Kinh độ (Longitude):</span>
+                      <span className="font-mono font-bold text-primary">{activity.longitude || "106.771200"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Bán kính cho phép:</span>
+                      <span className="font-semibold text-primary">{activity.radius_meters || "100"} mét</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Kinh độ (Longitude):</span>
-                    <span className="font-mono font-bold text-primary">{activity.longitude || "106.771200"}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Bán kính cho phép:</span>
-                    <span className="font-semibold text-primary">{activity.radius_meters || "100"} mét</span>
-                  </div>
-                </div>
+                )}
 
                 {/* Buttons based on role */}
                 <div className="flex flex-col gap-2 pt-2">
@@ -703,29 +795,79 @@ export default function ActivityDetail() {
       <Dialog open={isCheckInSimOpen} onOpenChange={setIsCheckInSimOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle className="font-display">Giả lập Check-in GPS định vị</DialogTitle>
-            <DialogDescription>Hệ thống tự động xác thực vĩ độ, kinh độ, selfie và device ID của thiết bị.</DialogDescription>
+            <DialogTitle className="font-display text-base font-bold">Check-in định vị GPS</DialogTitle>
+            <DialogDescription className="text-xs">Hệ thống tự động xác thực vĩ độ, kinh độ và selfie của bạn.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCheckIn} className="space-y-4 py-2 text-xs">
-            <div className="space-y-1">
-              <Label>Vĩ độ giả lập (Latitude)</Label>
-              <Input value={simLat} onChange={e => setSimLat(e.target.value)} required />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Vĩ độ (Latitude)</Label>
+                <Input value={simLat} readOnly disabled className="bg-muted font-mono text-xs cursor-not-allowed" />
+              </div>
+              <div className="space-y-1">
+                <Label>Kinh độ (Longitude)</Label>
+                <Input value={simLon} readOnly disabled className="bg-muted font-mono text-xs cursor-not-allowed" />
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label>Kinh độ giả lập (Longitude)</Label>
-              <Input value={simLon} onChange={e => setSimLon(e.target.value)} required />
+
+            <div className="space-y-2">
+              <Label className="font-semibold text-foreground">Ảnh Selfie minh chứng</Label>
+              {selfiePreviewUrl ? (
+                <div className="relative rounded-xl overflow-hidden border bg-muted max-w-[200px] mx-auto">
+                  <img src={selfiePreviewUrl} alt="Selfie preview" className="w-full h-32 object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelfiePreviewUrl(null);
+                      setSimSelfie("");
+                    }}
+                    className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : cameraActive ? (
+                <div className="space-y-2 text-center">
+                  <div className="relative rounded-xl overflow-hidden border bg-black max-w-[240px] mx-auto">
+                    <video ref={videoRef} autoPlay playsInline className="w-full h-40 object-cover scale-x-[-1]" />
+                  </div>
+                  <div className="flex justify-center gap-2">
+                    <Button type="button" size="sm" onClick={capturePhoto} className="bg-primary text-white text-xs">Chụp hình</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={stopCamera} className="text-xs">Hủy</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={startCamera}
+                    className="flex flex-col items-center gap-1.5 py-4 h-auto border-dashed hover:border-primary hover:text-primary transition"
+                  >
+                    <Camera className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-[10px]">Chụp trực tiếp</span>
+                  </Button>
+                  <Label
+                    htmlFor="selfie-upload-input"
+                    className="flex flex-col items-center justify-center gap-1.5 py-4 border rounded-md cursor-pointer border-dashed hover:border-primary hover:text-primary transition bg-background"
+                  >
+                    <Image className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-[10px]">Tải ảnh lên</span>
+                    <input
+                      type="file"
+                      id="selfie-upload-input"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageFileChange}
+                    />
+                  </Label>
+                </div>
+              )}
             </div>
-            <div className="space-y-1">
-              <Label>Tên file Selfie</Label>
-              <Input value={simSelfie} onChange={e => setSimSelfie(e.target.value)} required />
-            </div>
-            <div className="space-y-1">
-              <Label>Device ID thiết bị</Label>
-              <Input value={simDeviceId} onChange={e => setSimDeviceId(e.target.value)} required />
-            </div>
+
             <DialogFooter className="border-t pt-4">
               <Button type="button" variant="outline" onClick={() => setIsCheckInSimOpen(false)}>Hủy</Button>
-              <Button type="submit" className="bg-success text-white">Xác nhận Check-in</Button>
+              <Button type="submit" className="bg-success text-white" disabled={!simSelfie}>Xác nhận Check-in</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -735,29 +877,79 @@ export default function ActivityDetail() {
       <Dialog open={isCheckOutSimOpen} onOpenChange={setIsCheckOutSimOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle className="font-display">Giả lập Check-out GPS định vị</DialogTitle>
-            <DialogDescription>Hệ thống tự động xác thực vĩ độ, kinh độ, selfie và device ID của thiết bị.</DialogDescription>
+            <DialogTitle className="font-display text-base font-bold">Check-out định vị GPS</DialogTitle>
+            <DialogDescription className="text-xs">Hệ thống tự động xác thực vĩ độ, kinh độ và selfie của bạn.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCheckOut} className="space-y-4 py-2 text-xs">
-            <div className="space-y-1">
-              <Label>Vĩ độ giả lập (Latitude)</Label>
-              <Input value={simLat} onChange={e => setSimLat(e.target.value)} required />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Vĩ độ (Latitude)</Label>
+                <Input value={simLat} readOnly disabled className="bg-muted font-mono text-xs cursor-not-allowed" />
+              </div>
+              <div className="space-y-1">
+                <Label>Kinh độ (Longitude)</Label>
+                <Input value={simLon} readOnly disabled className="bg-muted font-mono text-xs cursor-not-allowed" />
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label>Kinh độ giả lập (Longitude)</Label>
-              <Input value={simLon} onChange={e => setSimLon(e.target.value)} required />
+
+            <div className="space-y-2">
+              <Label className="font-semibold text-foreground">Ảnh Selfie minh chứng</Label>
+              {selfiePreviewUrl ? (
+                <div className="relative rounded-xl overflow-hidden border bg-muted max-w-[200px] mx-auto">
+                  <img src={selfiePreviewUrl} alt="Selfie preview" className="w-full h-32 object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelfiePreviewUrl(null);
+                      setSimSelfie("");
+                    }}
+                    className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : cameraActive ? (
+                <div className="space-y-2 text-center">
+                  <div className="relative rounded-xl overflow-hidden border bg-black max-w-[240px] mx-auto">
+                    <video ref={videoRef} autoPlay playsInline className="w-full h-40 object-cover scale-x-[-1]" />
+                  </div>
+                  <div className="flex justify-center gap-2">
+                    <Button type="button" size="sm" onClick={capturePhoto} className="bg-primary text-white text-xs">Chụp hình</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={stopCamera} className="text-xs">Hủy</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={startCamera}
+                    className="flex flex-col items-center gap-1.5 py-4 h-auto border-dashed hover:border-primary hover:text-primary transition"
+                  >
+                    <Camera className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-[10px]">Chụp trực tiếp</span>
+                  </Button>
+                  <Label
+                    htmlFor="selfie-checkout-upload-input"
+                    className="flex flex-col items-center justify-center gap-1.5 py-4 border rounded-md cursor-pointer border-dashed hover:border-primary hover:text-primary transition bg-background"
+                  >
+                    <Image className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-[10px]">Tải ảnh lên</span>
+                    <input
+                      type="file"
+                      id="selfie-checkout-upload-input"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageFileChange}
+                    />
+                  </Label>
+                </div>
+              )}
             </div>
-            <div className="space-y-1">
-              <Label>Tên file Selfie</Label>
-              <Input value={simSelfie} onChange={e => setSimSelfie(e.target.value)} required />
-            </div>
-            <div className="space-y-1">
-              <Label>Device ID thiết bị</Label>
-              <Input value={simDeviceId} onChange={e => setSimDeviceId(e.target.value)} required />
-            </div>
+
             <DialogFooter className="border-t pt-4">
               <Button type="button" variant="outline" onClick={() => setIsCheckOutSimOpen(false)}>Hủy</Button>
-              <Button type="submit" className="bg-success text-white">Xác nhận Check-out</Button>
+              <Button type="submit" className="bg-success text-white" disabled={!simSelfie}>Xác nhận Check-out</Button>
             </DialogFooter>
           </form>
         </DialogContent>
