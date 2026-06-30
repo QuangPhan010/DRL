@@ -143,20 +143,36 @@ export function parseClassName(className: string) {
   }
   
   // 2. Extract Ngành (Major)
-  let major = "Kỹ thuật Phần mềm";
-  if (upper.includes("CNTT") || upper.includes("KTPM")) {
-    major = "Kỹ thuật Phần mềm";
-  } else if (upper.includes("QTKS")) {
-    major = "Kinh tế Quốc tế";
-  } else if (upper.includes("KT")) {
-    major = "Quản trị Kinh doanh";
-  } else if (upper.includes("CK")) {
-    major = "Kỹ thuật Cơ khí";
-  } else if (upper.includes("DT")) {
-    major = "Kỹ thuật Điện";
-  } else if (upper.includes("NN") || upper.includes("NNT")) {
-    major = "Ngôn ngữ Anh";
-  }
+  const parts = upper.split(/[-_]/);
+  const code = parts[1] || "";
+  
+  const MAJOR_CODE_MAP: Record<string, string> = {
+    "CNTT": "Kỹ thuật Phần mềm",
+    "KTPM": "Kỹ thuật Phần mềm",
+    "KHDL": "Khoa học Dữ liệu",
+    "MMT": "Mạng máy tính và Truyền thông",
+    "AI": "Trí tuệ Nhân tạo",
+    "LH": "Quản trị dịch vụ Du lịch và Lữ hành",
+    "NH": "Quản trị Nhà hàng và Dịch vụ ăn uống",
+    "HDDL": "Hướng dẫn Du lịch",
+    "HD": "Hướng dẫn Du lịch",
+    "QTKS": "Kinh tế Quốc tế",
+    "QTKD": "Quản trị Kinh doanh",
+    "KT": "Quản trị Kinh doanh",
+    "KDT": "Kinh doanh Thương mại",
+    "KDQT": "Kinh doanh Quốc tế",
+    "KDOT": "Kinh doanh Quốc tế",
+    "CK": "Kỹ thuật Cơ khí",
+    "DT": "Kỹ thuật Điện",
+    "DDT": "Kỹ thuật Điện",
+    "BPD": "Biên phiên dịch tiếng Anh",
+    "NNT": "Ngôn ngữ Trung Quốc",
+    "NNP": "Ngôn ngữ Pháp",
+    "NN": "Ngôn ngữ Anh",
+    "NNA": "Ngôn ngữ Anh",
+  };
+  
+  const major = MAJOR_CODE_MAP[code] || "";
   
   // 3. Extract Hệ (Program)
   let program = "Chính quy";
@@ -197,15 +213,24 @@ export function getFacultyData(facultyName: string) {
   return FACULTY_HIERARCHY.find(f => f.name.toLowerCase().trim() === name);
 }
 
+export function getDefaultMajorForFaculty(faculty: string): string {
+  const name = faculty.toLowerCase().trim();
+  if (name.includes("công nghệ thông tin") || name === "cntt") return "Kỹ thuật Phần mềm";
+  if (name.includes("kinh tế") || name === "kt") return "Quản trị Kinh doanh";
+  if (name.includes("cơ khí") || name === "ck") return "Kỹ thuật Cơ khí";
+  if (name.includes("điện") || name === "dt") return "Kỹ thuật Điện";
+  if (name.includes("ngoại ngữ") || name === "nn") return "Ngôn ngữ Anh";
+  if (name.includes("du lịch") || name === "dl") return "Quản trị dịch vụ Du lịch và Lữ hành";
+  return "Kỹ thuật Phần mềm";
+}
+
 // Helper to deterministically assign properties to models for mock display
 export function getStudentMajor(studentId: string, faculty: string, className?: string): string {
   if (className && className !== "none" && className !== "") {
-    return parseClassName(className).major;
+    const parsedMajor = parseClassName(className).major;
+    if (parsedMajor) return parsedMajor;
   }
-  const facultyData = getFacultyData(faculty) || FACULTY_HIERARCHY[0];
-  const numId = parseInt(studentId.replace(/\D/g, "")) || 0;
-  const majorIndex = numId % facultyData.majors.length;
-  return facultyData.majors[majorIndex]?.name || facultyData.majors[0].name;
+  return getDefaultMajorForFaculty(faculty);
 }
 
 export function getStudentProgram(studentId: string, faculty: string, major: string, className?: string): string {

@@ -43,6 +43,13 @@ export default function Students() {
   const [editing, setEditing] = useState<Student | null>(null);
   const [form, setForm] = useState<Omit<Student, "id">>(empty);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, facultyFilter, majorFilter, heFilter, cohortFilter, levelFilter, clbFilter]);
+
   const isMonitor = user?.role === "class_monitor";
 
   // Dynamically extract unique values from database records
@@ -51,49 +58,18 @@ export default function Students() {
   }, [students]);
 
   const availableMajors = useMemo(() => {
-    const allUniqueMajors = Array.from(new Set(students.map(s => getStudentMajor(s.studentId, s.faculty, s.className)).filter(Boolean)));
-    if (facultyFilter === "all") {
-      return allUniqueMajors;
-    }
-    const facultyData = getFacultyData(facultyFilter);
-    if (!facultyData) return [];
-    const allowed = facultyData.majors.map(m => m.name.toLowerCase().trim());
-    return allUniqueMajors.filter(m => allowed.includes(m.toLowerCase().trim()));
+    const filteredStudents = students.filter(s => facultyFilter === "all" || s.faculty.toLowerCase().trim() === facultyFilter.toLowerCase().trim());
+    return Array.from(new Set(filteredStudents.map(s => getStudentMajor(s.studentId, s.faculty, s.className)).filter(Boolean)));
   }, [students, facultyFilter]);
 
   const availablePrograms = useMemo(() => {
-    const allUniquePrograms = Array.from(new Set(students.map(s => {
+    const filteredStudents = students.filter(s => {
+      const matchF = facultyFilter === "all" || s.faculty.toLowerCase().trim() === facultyFilter.toLowerCase().trim();
       const major = getStudentMajor(s.studentId, s.faculty, s.className);
-      return getStudentProgram(s.studentId, s.faculty, major, s.className);
-    }).filter(Boolean)));
-
-    if (majorFilter === "all") {
-      if (facultyFilter !== "all") {
-        const facultyData = getFacultyData(facultyFilter);
-        if (facultyData) {
-          const allowedProgs: string[] = [];
-          facultyData.majors.forEach(m => {
-            m.programs.forEach(p => {
-              if (!allowedProgs.includes(p)) allowedProgs.push(p);
-            });
-          });
-          return allUniquePrograms.filter(p => allowedProgs.map(ap => ap.toLowerCase().trim()).includes(p.toLowerCase().trim()));
-        }
-      }
-      return allUniquePrograms;
-    }
-
-    let foundMajor: any = null;
-    for (const f of FACULTY_HIERARCHY) {
-      const m = f.majors.find(maj => maj.name.toLowerCase().trim() === majorFilter.toLowerCase().trim());
-      if (m) {
-        foundMajor = m;
-        break;
-      }
-    }
-    if (!foundMajor) return [];
-    const allowed = foundMajor.programs.map((p: string) => p.toLowerCase().trim());
-    return allUniquePrograms.filter(p => allowed.includes(p.toLowerCase().trim()));
+      const matchM = majorFilter === "all" || major.toLowerCase().trim() === majorFilter.toLowerCase().trim();
+      return matchF && matchM;
+    });
+    return Array.from(new Set(filteredStudents.map(s => getStudentProgram(s.studentId, s.faculty, getStudentMajor(s.studentId, s.faculty, s.className), s.className)).filter(Boolean)));
   }, [students, facultyFilter, majorFilter]);
 
   const cohortsList = useMemo(() => {
@@ -239,6 +215,13 @@ export default function Students() {
 
     return matchQ && matchF && matchC && matchMajor && matchHe && matchCohort && matchLevel && matchCLB;
   }), [students, search, facultyFilter, classFilter, majorFilter, heFilter, cohortFilter, levelFilter, clbFilter, isMonitor, monitorClassName]);
+
+  const paginatedStudents = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filtered.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filtered, currentPage]);
+
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
 
   const openCreate = () => { setEditing(null); setForm(empty); setOpen(true); };
   const openEdit = (s: Student) => { setEditing(s); setForm(s); setOpen(true); };
@@ -460,7 +443,7 @@ export default function Students() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map(s => {
+              {paginatedStudents.map(s => {
                 const major = getStudentMajor(s.studentId, s.faculty || "", s.className);
                 const program = getStudentProgram(s.studentId, s.faculty || "", major, s.className);
                 const level = getStudentLevel(s.studentId, program, s.className);
@@ -476,20 +459,6 @@ export default function Students() {
                         </div>
                         <div>
                           <div className="font-medium text-sm">{s.fullName}</div>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
-                              {major}
-                            </Badge>
-                            <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
-                              {program}
-                            </Badge>
-                            <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
-                              {level}
-                            </Badge>
-                            <Badge variant="outline" className="text-[9px] text-muted-foreground px-1 py-0 bg-transparent border-dashed">
-                              {club}
-                            </Badge>
-                          </div>
                         </div>
                       </div>
                     </TableCell>
@@ -530,8 +499,50 @@ export default function Students() {
             </TableBody>
           </Table>
         </CardContent>
-        <div className="p-4 border-t flex items-center justify-between text-sm text-muted-foreground">
-          <span>Hiển thị {filtered.length} / {isMonitor ? filtered.length : students.length} sinh viên</span>
+        <div className="p-4 border-t flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground bg-muted/5">
+          <span>Hiển thị <span className="font-semibold text-foreground">{filtered.length === 0 ? 0 : (currentPage - 1) * ITEMS_PER_PAGE + 1}</span> - <span className="font-semibold text-foreground">{Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)}</span> trong số <span className="font-semibold text-foreground">{filtered.length}</span> sinh viên</span>
+          
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="h-8 px-2 text-xs"
+              >
+                Trước
+              </Button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => {
+                if (p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1) {
+                  return (
+                    <Button
+                      key={p}
+                      variant={currentPage === p ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setCurrentPage(p)}
+                      className={`h-8 w-8 text-xs p-0 ${currentPage === p ? "bg-gradient-primary border-0 text-white shadow-sm font-semibold" : ""}`}
+                    >
+                      {p}
+                    </Button>
+                  );
+                }
+                if (p === 2 || p === totalPages - 1) {
+                  return <span key={p} className="text-muted-foreground px-1 text-xs select-none">...</span>;
+                }
+                return null;
+              })}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="h-8 px-2 text-xs"
+              >
+                Sau
+              </Button>
+            </div>
+          )}
         </div>
       </Card>
 

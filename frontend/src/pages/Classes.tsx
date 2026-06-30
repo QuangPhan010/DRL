@@ -42,46 +42,18 @@ export default function Classes() {
   }, [classes]);
 
   const availableMajors = useMemo(() => {
-    const allUniqueMajors = Array.from(new Set(classes.map(c => parseClassName(c.name).major).filter(Boolean)));
-    if (facultyFilter === "all") {
-      return allUniqueMajors;
-    }
-    const facultyData = getFacultyData(facultyFilter);
-    if (!facultyData) return [];
-    const allowed = facultyData.majors.map(m => m.name.toLowerCase().trim());
-    return allUniqueMajors.filter(m => allowed.includes(m.toLowerCase().trim()));
+    const filtered = classes.filter(c => facultyFilter === "all" || c.faculty.toLowerCase().trim() === facultyFilter.toLowerCase().trim());
+    return Array.from(new Set(filtered.map(c => parseClassName(c.name).major).filter(Boolean)));
   }, [classes, facultyFilter]);
 
   const availablePrograms = useMemo(() => {
-    const allUniquePrograms = Array.from(new Set(classes.map(c => parseClassName(c.name).program).filter(Boolean)));
-
-    if (majorFilter === "all") {
-      if (facultyFilter !== "all") {
-        const facultyData = getFacultyData(facultyFilter);
-        if (facultyData) {
-          const allowedProgs: string[] = [];
-          facultyData.majors.forEach(m => {
-            m.programs.forEach(p => {
-              if (!allowedProgs.includes(p)) allowedProgs.push(p);
-            });
-          });
-          return allUniquePrograms.filter(p => allowedProgs.map(ap => ap.toLowerCase().trim()).includes(p.toLowerCase().trim()));
-        }
-      }
-      return allUniquePrograms;
-    }
-
-    let foundMajor: any = null;
-    for (const f of FACULTY_HIERARCHY) {
-      const m = f.majors.find(maj => maj.name.toLowerCase().trim() === majorFilter.toLowerCase().trim());
-      if (m) {
-        foundMajor = m;
-        break;
-      }
-    }
-    if (!foundMajor) return [];
-    const allowed = foundMajor.programs.map((p: string) => p.toLowerCase().trim());
-    return allUniquePrograms.filter(p => allowed.includes(p.toLowerCase().trim()));
+    const filtered = classes.filter(c => {
+      const matchF = facultyFilter === "all" || c.faculty.toLowerCase().trim() === facultyFilter.toLowerCase().trim();
+      const parsed = parseClassName(c.name);
+      const matchM = majorFilter === "all" || parsed.major.toLowerCase().trim() === majorFilter.toLowerCase().trim();
+      return matchF && matchM;
+    });
+    return Array.from(new Set(filtered.map(c => parseClassName(c.name).program).filter(Boolean)));
   }, [classes, facultyFilter, majorFilter]);
 
   const cohortsList = useMemo(() => {
