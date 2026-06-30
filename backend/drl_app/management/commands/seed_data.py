@@ -1,7 +1,7 @@
 import datetime
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from drl_app.models import ClassInfo, Student, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization
+from drl_app.models import ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization
 
 User = get_user_model()
 
@@ -19,6 +19,7 @@ class Command(BaseCommand):
         SubItem.objects.all().delete()
         GroupCriterion.objects.all().delete()
         Criterion.objects.all().delete()
+        CriteriaSet.objects.all().delete()
         Student.objects.all().delete()
         ClassInfo.objects.all().delete()
         User.objects.all().delete()
@@ -117,6 +118,13 @@ class Command(BaseCommand):
             db_students.append(std)
 
         self.stdout.write('Creating criteria...')
+        criteria_set = CriteriaSet.objects.create(
+            name='Bộ tiêu chí HK1 2024-2025',
+            description='Bộ tiêu chí mặc định được tạo từ dữ liệu mẫu.',
+            semester='HK1',
+            academic_year='2024-2025',
+            is_active=True,
+        )
         criteria_data = [
             {
                 'code': 'I',
@@ -207,6 +215,7 @@ class Command(BaseCommand):
         db_sub_items = []
         for cr in criteria_data:
             c = Criterion.objects.create(
+                criteria_set=criteria_set,
                 code=cr['code'],
                 name=cr['name'],
                 max_score=cr['max_score'],
@@ -233,6 +242,7 @@ class Command(BaseCommand):
 
                     eval_obj = Evaluation.objects.create(
                         student=std,
+                        criteria_set=criteria_set,
                         semester=sem,
                         year=yr,
                         status=status_val,

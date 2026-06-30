@@ -36,7 +36,7 @@ export default function Approvals() {
       }
 
       // 1. Fetch Criteria
-      const criteriaRes = await fetch(`${API_URL}/criteria/`, { headers });
+      const criteriaRes = await fetch(`${API_URL}/criteria/?all=true`, { headers });
       if (criteriaRes.ok) {
         const criteriaData = await criteriaRes.json();
         setCriteria(criteriaData);
@@ -246,7 +246,7 @@ export default function Approvals() {
               </div>
 
               <div className="space-y-3">
-                {criteria.map(c => {
+                {criteria.filter(c => c.criteria_set === viewing.criteria_set).map(c => {
                   const sc = viewing.scores[c.id] || 0;
                   return (
                     <div key={c.id}>

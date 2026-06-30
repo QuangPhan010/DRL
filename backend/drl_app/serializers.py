@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import User, ClassInfo, Student, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag
+from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag
 
 class ClassPositionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -69,12 +69,36 @@ class GroupCriterionSerializer(serializers.ModelSerializer):
         model = GroupCriterion
         fields = ('id', 'name', 'is_single_choice', 'subItems')
 
+class CriteriaSetSerializer(serializers.ModelSerializer):
+    criteria_count = serializers.IntegerField(source='criteria.count', read_only=True)
+    total_max_score = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CriteriaSet
+        fields = (
+            'id', 'name', 'description', 'semester', 'academic_year',
+            'effective_from', 'effective_to', 'is_active', 'criteria_count',
+            'total_max_score', 'created_at', 'updated_at'
+        )
+
+    def get_total_max_score(self, obj):
+        return sum(item.max_score for item in obj.criteria.all())
+
+    def validate(self, attrs):
+        effective_from = attrs.get('effective_from', getattr(self.instance, 'effective_from', None))
+        effective_to = attrs.get('effective_to', getattr(self.instance, 'effective_to', None))
+        if effective_from and effective_to and effective_from > effective_to:
+            raise serializers.ValidationError({
+                'effective_to': 'Ngày kết thúc phải bằng hoặc sau ngày bắt đầu.'
+            })
+        return attrs
+
 class CriterionSerializer(serializers.ModelSerializer):
     groups = GroupCriterionSerializer(many=True, read_only=True)
 
     class Meta:
         model = Criterion
-        fields = ('id', 'code', 'name', 'max_score', 'description', 'groups')
+        fields = ('id', 'criteria_set', 'code', 'name', 'max_score', 'description', 'groups')
 
 class EvaluationDetailSerializer(serializers.ModelSerializer):
     sub_item_id = serializers.IntegerField(source='sub_item.id')
@@ -96,7 +120,7 @@ class EvaluationSerializer(serializers.ModelSerializer):
             'id', 'student', 'student_name', 'class_name', 'student_id',
             'semester', 'year', 'note', 'total_score', 'classification',
             'status', 'submitted_at', 'reviewed_by', 'review_note',
-            'class_confirmed', 'details', 'scores'
+            'class_confirmed', 'criteria_set', 'details', 'scores'
         )
 
     def get_scores(self, obj):

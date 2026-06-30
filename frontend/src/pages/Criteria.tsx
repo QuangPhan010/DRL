@@ -1,15 +1,16 @@
 import { useState, useEffect } from "react";
-import { Sparkles, Plus, Edit, Trash2, Settings2, FolderPlus, FilePlus } from "lucide-react";
+import { Sparkles, Plus, Edit, Trash2, Settings2, FolderPlus, FilePlus, Copy, CheckCircle2, Layers3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Criterion, GroupCriterion } from "@/lib/mock-data";
-import { useAuth, API_URL } from "@/contexts/AuthContext";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Criterion, CriteriaSet, GroupCriterion } from "@/lib/mock-data";
+import { API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const classifications = [
@@ -21,16 +22,50 @@ const classifications = [
   { name: "Kém", min: 0, max: 34, color: "from-destructive to-red-500" },
 ];
 
+const mutationHeaders = () => {
+  let token = localStorage.getItem("drl_token");
+  if (!token) {
+    try {
+      const savedUser = JSON.parse(localStorage.getItem("drl_user") || "null");
+      if (savedUser?.username) {
+        token = `mock-token-for-${savedUser.username}`;
+        localStorage.setItem("drl_token", token);
+      }
+    } catch {
+      // Invalid legacy session data will be handled by the API as unauthenticated.
+    }
+  }
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+};
+
 export default function Criteria() {
   const [criteria, setCriteria] = useState<Criterion[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Criterion | null>(null);
+  const [criteriaSets, setCriteriaSets] = useState<CriteriaSet[]>([]);
+  const [selectedSetId, setSelectedSetId] = useState("");
+  const [setDialogOpen, setSetDialogOpen] = useState(false);
+  const [criteriaSetName, setCriteriaSetName] = useState("");
+  const [criteriaSetDescription, setCriteriaSetDescription] = useState("");
+  const [setSemester, setSetSemester] = useState("HK1");
+  const [setAcademicYear, setSetAcademicYear] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState("");
+  const [effectiveTo, setEffectiveTo] = useState("");
+  const [copyCurrentSet, setCopyCurrentSet] = useState(true);
 
-  const fetchCriteria = async () => {
+  const fetchCriteria = async (criteriaSetId = selectedSetId) => {
+    if (!criteriaSetId) {
+      setCriteria([]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/criteria/`);
+      const res = await fetch(`${API_URL}/criteria/?criteria_set=${criteriaSetId}`);
       if (res.ok) {
         const data = await res.json();
         const mapped = data.map((c: any) => ({
@@ -62,8 +97,38 @@ export default function Criteria() {
   };
 
   useEffect(() => {
-    fetchCriteria();
+    const fetchCriteriaSets = async () => {
+      try {
+        const res = await fetch(`${API_URL}/criteria-sets/`);
+        if (!res.ok) throw new Error("Không thể tải bộ tiêu chí");
+        const data = await res.json();
+        const mapped: CriteriaSet[] = data.map((item: any) => ({
+          id: item.id.toString(),
+          name: item.name,
+          description: item.description || "",
+          semester: item.semester || "",
+          academicYear: item.academic_year || "",
+          effectiveFrom: item.effective_from || "",
+          effectiveTo: item.effective_to || "",
+          isActive: item.is_active,
+          criteriaCount: item.criteria_count,
+          totalMaxScore: item.total_max_score
+        }));
+        setCriteriaSets(mapped);
+        setSelectedSetId(current => {
+          if (current && mapped.some(item => item.id === current)) return current;
+          return (mapped.find(item => item.isActive) || mapped[0])?.id || "";
+        });
+      } catch {
+        toast.error("Không thể tải danh sách bộ tiêu chí");
+      }
+    };
+    fetchCriteriaSets();
   }, []);
+
+  useEffect(() => {
+    fetchCriteria(selectedSetId);
+  }, [selectedSetId]);
   
   // Form states matching 3-level structure
   const [code, setCode] = useState("");
@@ -72,7 +137,91 @@ export default function Criteria() {
   const [description, setDescription] = useState("");
   const [groups, setGroups] = useState<GroupCriterion[]>([]);
 
-  const totalMax = criteria.reduce((s, c) => s + c.maxScore, 0);
+  const selectedSet = criteriaSets.find(item => item.id === selectedSetId);
+
+  const refreshCriteriaSets = async (selectId?: string) => {
+    const res = await fetch(`${API_URL}/criteria-sets/`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const mapped: CriteriaSet[] = data.map((item: any) => ({
+      id: item.id.toString(),
+      name: item.name,
+      description: item.description || "",
+      semester: item.semester || "",
+      academicYear: item.academic_year || "",
+      effectiveFrom: item.effective_from || "",
+      effectiveTo: item.effective_to || "",
+      isActive: item.is_active,
+      criteriaCount: item.criteria_count,
+      totalMaxScore: item.total_max_score
+    }));
+    setCriteriaSets(mapped);
+    if (selectId) setSelectedSetId(selectId);
+  };
+
+  const openCreateSet = () => {
+    setCriteriaSetName("");
+    setCriteriaSetDescription("");
+    setSetSemester(selectedSet?.semester || "HK1");
+    setSetAcademicYear(selectedSet?.academicYear || "");
+    setEffectiveFrom("");
+    setEffectiveTo("");
+    setCopyCurrentSet(Boolean(selectedSetId));
+    setSetDialogOpen(true);
+  };
+
+  const createCriteriaSet = async () => {
+    if (!criteriaSetName.trim()) {
+      toast.error("Vui lòng nhập tên bộ tiêu chí");
+      return;
+    }
+    if (effectiveFrom && effectiveTo && effectiveFrom > effectiveTo) {
+      toast.error("Ngày bắt đầu phải trước ngày kết thúc");
+      return;
+    }
+    const payload = {
+      name: criteriaSetName.trim(),
+      description: criteriaSetDescription,
+      semester: setSemester,
+      academic_year: setAcademicYear,
+      effective_from: effectiveFrom || null,
+      effective_to: effectiveTo || null,
+      clone_from: copyCurrentSet ? selectedSetId : null
+    };
+    try {
+      const res = await fetch(`${API_URL}/criteria-sets/`, {
+        method: "POST",
+        headers: mutationHeaders(),
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const message = res.status === 403
+          ? "Phiên đăng nhập không có quyền quản trị. Vui lòng đăng xuất và đăng nhập lại bằng tài khoản admin."
+          : data.detail || "Không thể tạo bộ tiêu chí";
+        throw new Error(message);
+      }
+      await refreshCriteriaSets(data.id.toString());
+      setSetDialogOpen(false);
+      toast.success(copyCurrentSet ? "Đã tạo bản sao bộ tiêu chí" : "Đã tạo bộ tiêu chí mới");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không thể tạo bộ tiêu chí");
+    }
+  };
+
+  const activateCriteriaSet = async () => {
+    if (!selectedSetId) return;
+    const res = await fetch(`${API_URL}/criteria-sets/${selectedSetId}/activate/`, {
+      method: "POST",
+      headers: mutationHeaders()
+    });
+    if (res.ok) {
+      await refreshCriteriaSets(selectedSetId);
+      toast.success(`Đã áp dụng bộ tiêu chí “${selectedSet?.name}”`);
+    } else {
+      toast.error("Không thể chuyển bộ tiêu chí đang áp dụng");
+    }
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -180,6 +329,7 @@ export default function Criteria() {
     });
 
     const payload = {
+      criteria_set: selectedSetId,
       code,
       name,
       maxScore,
@@ -198,24 +348,26 @@ export default function Criteria() {
       if (editing) {
         const res = await fetch(`${API_URL}/criteria/${editing.id}/`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: mutationHeaders(),
           body: JSON.stringify(payload)
         });
         if (res.ok) {
           toast.success("Đã cập nhật hệ thống tiêu chí 3 cấp thành công!");
-          fetchCriteria();
+          fetchCriteria(selectedSetId);
+          refreshCriteriaSets(selectedSetId);
         } else {
           toast.error("Không thể cập nhật tiêu chí");
         }
       } else {
         const res = await fetch(`${API_URL}/criteria/`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: mutationHeaders(),
           body: JSON.stringify(payload)
         });
         if (res.ok) {
           toast.success("Đã tạo tiêu chí lớn và các nhóm mới!");
-          fetchCriteria();
+          fetchCriteria(selectedSetId);
+          refreshCriteriaSets(selectedSetId);
         } else {
           toast.error("Không thể tạo tiêu chí");
         }
@@ -229,11 +381,13 @@ export default function Criteria() {
   const remove = async (id: string) => {
     try {
       const res = await fetch(`${API_URL}/criteria/${id}/`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: mutationHeaders()
       });
       if (res.ok) {
         toast.success("Đã xóa tiêu chí lớn");
-        fetchCriteria();
+        fetchCriteria(selectedSetId);
+        refreshCriteriaSets(selectedSetId);
       } else {
         toast.error("Không thể xóa tiêu chí");
       }
@@ -251,10 +405,63 @@ export default function Criteria() {
           </h1>
           <p className="text-muted-foreground mt-1">Thiết kế bảng điểm 3 cấp chuẩn theo file Excel của nhà trường.</p>
         </div>
-        <Button onClick={openCreate} className="gap-2 bg-gradient-primary shadow-md">
-          <Plus className="h-4 w-4" />Thêm tiêu chí (Cấp 1)
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={openCreateSet} className="gap-2">
+            <Layers3 className="h-4 w-4" />Tạo bộ tiêu chí
+          </Button>
+          <Button onClick={openCreate} disabled={!selectedSetId} className="gap-2 bg-gradient-primary shadow-md">
+            <Plus className="h-4 w-4" />Thêm tiêu chí (Cấp 1)
+          </Button>
+        </div>
       </div>
+
+      <Card className="border-primary/20 shadow-md">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-2 flex-1">
+              <Label>Bộ tiêu chí đang xem</Label>
+              <Select value={selectedSetId} onValueChange={setSelectedSetId}>
+                <SelectTrigger className="max-w-xl">
+                  <SelectValue placeholder="Chọn một bộ tiêu chí" />
+                </SelectTrigger>
+                <SelectContent>
+                  {criteriaSets.map(item => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}{item.isActive ? " — Đang áp dụng" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedSet && !selectedSet.isActive && (
+              <Button onClick={activateCriteriaSet} className="gap-2">
+                <CheckCircle2 className="h-4 w-4" />Dùng bộ này
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {selectedSet ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Badge variant={selectedSet.isActive ? "default" : "secondary"}>
+                {selectedSet.isActive ? "Đang áp dụng" : "Chưa áp dụng"}
+              </Badge>
+              {selectedSet.semester && <Badge variant="outline">{selectedSet.semester}</Badge>}
+              {selectedSet.academicYear && <Badge variant="outline">Năm học {selectedSet.academicYear}</Badge>}
+              {(selectedSet.effectiveFrom || selectedSet.effectiveTo) && (
+                <span className="text-muted-foreground">
+                  Hiệu lực: {selectedSet.effectiveFrom || "không giới hạn"} → {selectedSet.effectiveTo || "không giới hạn"}
+                </span>
+              )}
+              <span className="text-muted-foreground">
+                {selectedSet.criteriaCount} mục · tổng tối đa {selectedSet.totalMaxScore} điểm
+              </span>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Chưa có bộ tiêu chí. Hãy tạo bộ đầu tiên để bắt đầu.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Classification scale */}
       <Card className="border-0 shadow-md">
@@ -348,6 +555,72 @@ export default function Criteria() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={setDialogOpen} onOpenChange={setSetDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display">Tạo bộ tiêu chí mới</DialogTitle>
+            <DialogDescription>
+              Khai báo thời gian sử dụng. Sau khi kiểm tra cấu trúc, quản trị viên có thể chọn “Dùng bộ này”.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Tên bộ tiêu chí *</Label>
+              <Input value={criteriaSetName} onChange={event => setCriteriaSetName(event.target.value)} placeholder="Ví dụ: Bộ tiêu chí HK2 2026-2027" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Học kỳ</Label>
+                <Select value={setSemester} onValueChange={setSetSemester}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                    <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                    <SelectItem value="HK3">Học kỳ hè</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Năm học</Label>
+                <Input value={setAcademicYear} onChange={event => setSetAcademicYear(event.target.value)} placeholder="2026-2027" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Hiệu lực từ</Label>
+                <Input type="date" value={effectiveFrom} onChange={event => setEffectiveFrom(event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Hiệu lực đến</Label>
+                <Input type="date" value={effectiveTo} onChange={event => setEffectiveTo(event.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Mô tả</Label>
+              <Textarea value={criteriaSetDescription} onChange={event => setCriteriaSetDescription(event.target.value)} rows={2} />
+            </div>
+            {selectedSet && (
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+                <input
+                  type="checkbox"
+                  checked={copyCurrentSet}
+                  onChange={event => setCopyCurrentSet(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  <span className="flex items-center gap-1.5 text-sm font-medium"><Copy className="h-3.5 w-3.5" />Sao chép bộ đang xem</span>
+                  <span className="text-xs text-muted-foreground">Tạo sẵn toàn bộ cấu trúc từ “{selectedSet.name}” để chỉnh sửa nhanh.</span>
+                </span>
+              </label>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSetDialogOpen(false)}>Hủy</Button>
+            <Button onClick={createCriteriaSet}>Tạo bộ tiêu chí</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog: Edit/Create 3-Level Criterion */}
       <Dialog open={open} onOpenChange={setOpen}>

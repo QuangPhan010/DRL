@@ -24,7 +24,7 @@ export default function MyScores() {
       }
 
       // 1. Fetch criteria
-      const criteriaRes = await fetch(`${API_URL}/criteria/`, { headers });
+      const criteriaRes = await fetch(`${API_URL}/criteria/?all=true`, { headers });
       if (criteriaRes.ok) {
         const criteriaData = await criteriaRes.json();
         setCriteria(criteriaData);
@@ -138,7 +138,7 @@ export default function MyScores() {
             <Card className="border-0 shadow-md">
               <CardHeader><CardTitle className="font-display">Chi tiết tiêu chí HK gần nhất</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                {criteria.map(c => {
+                {criteria.filter(c => c.criteria_set === latest.criteria_set).map(c => {
                   const sc = latest.scores?.[c.id] || latest.scores?.[`c${c.id}`] || 0;
                   return (
                     <div key={c.id}>

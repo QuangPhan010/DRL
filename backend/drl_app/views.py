@@ -1,5 +1,6 @@
 import math
 from django.utils import timezone
+from django.db import transaction
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -8,14 +9,24 @@ from django.contrib.auth import authenticate
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import User, ClassInfo, Student, Criterion, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag
+from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag
 from .serializers import (
-    UserSerializer, ClassInfoSerializer, StudentSerializer, CriterionSerializer, 
+    UserSerializer, ClassInfoSerializer, StudentSerializer, CriteriaSetSerializer, CriterionSerializer,
     EvaluationSerializer, ActivitySerializer, ActivityParticipantSerializer,
     OrganizationSerializer, UserOrganizationSerializer, ClassPositionSerializer, StudentClassPositionSerializer,
     ActivityCheckInSerializer, ActivityCheckOutSerializer, ActivityAttendanceSerializer, FraudDetectionSerializer, AuditLogSerializer, ChangeRequestSerializer,
     ExternalActivitySerializer, EvidenceFileSerializer, EvidenceReviewSerializer, FraudFlagSerializer
 )
+
+class CriteriaAdminOrReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ('admin', 'student_affairs')
+        )
 
 # 1. Login View
 @swagger_auto_schema(
@@ -435,11 +446,105 @@ class StudentViewSet(viewsets.ModelViewSet):
         wb.save(response)
         return response
 
-# 4. Criterion ViewSet
+# 4. Criteria set and criterion ViewSets
+class CriteriaSetViewSet(viewsets.ModelViewSet):
+    queryset = CriteriaSet.objects.prefetch_related('criteria').all()
+    serializer_class = CriteriaSetSerializer
+    permission_classes = [CriteriaAdminOrReadOnly]
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        activate = bool(data.get('is_active', False))
+        clone_from = data.pop('clone_from', None)
+        data['is_active'] = False
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            criteria_set = serializer.save()
+            if clone_from:
+                source = get_object_or_404(
+                    CriteriaSet.objects.prefetch_related('criteria__groups__sub_items'),
+                    pk=clone_from
+                )
+                for source_criterion in source.criteria.all():
+                    criterion = Criterion.objects.create(
+                        criteria_set=criteria_set,
+                        code=source_criterion.code,
+                        name=source_criterion.name,
+                        max_score=source_criterion.max_score,
+                        description=source_criterion.description,
+                    )
+                    for source_group in source_criterion.groups.all():
+                        group = GroupCriterion.objects.create(
+                            criterion=criterion,
+                            name=source_group.name,
+                            is_single_choice=source_group.is_single_choice,
+                        )
+                        SubItem.objects.bulk_create([
+                            SubItem(group=group, name=item.name, max_score=item.max_score)
+                            for item in source_group.sub_items.all()
+                        ])
+            if activate:
+                CriteriaSet.objects.exclude(pk=criteria_set.pk).update(is_active=False)
+                criteria_set.is_active = True
+                criteria_set.save(update_fields=('is_active', 'updated_at'))
+
+        return Response(self.get_serializer(criteria_set).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        activate = bool(request.data.get('is_active', False))
+        with transaction.atomic():
+            response = super().update(request, *args, **kwargs)
+            if activate:
+                CriteriaSet.objects.exclude(pk=self.get_object().pk).update(is_active=False)
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        criteria_set = self.get_object()
+        if criteria_set.is_active:
+            return Response(
+                {'detail': 'Không thể xóa bộ tiêu chí đang được áp dụng.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if criteria_set.evaluations.exists():
+            return Response(
+                {'detail': 'Không thể xóa bộ tiêu chí đã được dùng trong phiếu đánh giá.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'])
+    def activate(self, request, pk=None):
+        criteria_set = self.get_object()
+        if not criteria_set.criteria.exists():
+            return Response(
+                {'detail': 'Không thể áp dụng một bộ chưa có tiêu chí.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        with transaction.atomic():
+            CriteriaSet.objects.exclude(pk=criteria_set.pk).update(is_active=False)
+            criteria_set.is_active = True
+            criteria_set.save(update_fields=('is_active', 'updated_at'))
+        return Response(self.get_serializer(criteria_set).data)
+
+
 class CriterionViewSet(viewsets.ModelViewSet):
-    queryset = Criterion.objects.all()
+    queryset = Criterion.objects.select_related('criteria_set').prefetch_related('groups__sub_items').all()
     serializer_class = CriterionSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [CriteriaAdminOrReadOnly]
+
+    def get_queryset(self):
+        queryset = self.queryset
+        if self.action != 'list':
+            return queryset
+        criteria_set_id = self.request.query_params.get('criteria_set')
+        if criteria_set_id:
+            return queryset.filter(criteria_set_id=criteria_set_id)
+        if self.request.query_params.get('all') == 'true':
+            return queryset
+        active_set = CriteriaSet.objects.filter(is_active=True).first()
+        return queryset.filter(criteria_set=active_set) if active_set else queryset.none()
 
     def create(self, request, *args, **kwargs):
         code = request.data.get('code')
@@ -447,8 +552,19 @@ class CriterionViewSet(viewsets.ModelViewSet):
         max_score = request.data.get('maxScore') or request.data.get('max_score', 0)
         description = request.data.get('description', '')
         groups_data = request.data.get('groups', [])
+        criteria_set_id = request.data.get('criteria_set')
+        criteria_set = (
+            get_object_or_404(CriteriaSet, pk=criteria_set_id)
+            if criteria_set_id else CriteriaSet.objects.filter(is_active=True).first()
+        )
+        if not criteria_set:
+            return Response(
+                {'detail': 'Vui lòng tạo hoặc kích hoạt một bộ tiêu chí trước.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         criterion = Criterion.objects.create(
+            criteria_set=criteria_set,
             code=code,
             name=name,
             max_score=max_score,
@@ -473,6 +589,11 @@ class CriterionViewSet(viewsets.ModelViewSet):
 
     def update(self, request, pk=None, *args, **kwargs):
         criterion = self.get_object()
+        if criterion.criteria_set.evaluations.exists():
+            return Response(
+                {'detail': 'Bộ tiêu chí đã được sử dụng nên không thể sửa cấu trúc.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         criterion.code = request.data.get('code', criterion.code)
         criterion.name = request.data.get('name', criterion.name)
         criterion.max_score = request.data.get('maxScore') or request.data.get('max_score', criterion.max_score)
@@ -497,6 +618,15 @@ class CriterionViewSet(viewsets.ModelViewSet):
                     )
 
         return Response(CriterionSerializer(criterion).data)
+
+    def destroy(self, request, *args, **kwargs):
+        criterion = self.get_object()
+        if criterion.criteria_set.evaluations.exists():
+            return Response(
+                {'detail': 'Bộ tiêu chí đã được sử dụng nên không thể xóa tiêu chí.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
 
 # 5. Evaluation ViewSet
 class EvaluationViewSet(viewsets.ModelViewSet):
@@ -539,6 +669,27 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         scores_data = request.data.get('scores', {}) # dict of subitem_id -> score
         note = request.data.get('note', '')
         status_param = request.data.get('status', 'draft')
+        requested_set_id = request.data.get('criteriaSet') or request.data.get('criteria_set')
+
+        existing_evaluation = Evaluation.objects.filter(
+            student=student, semester=semester, year=year
+        ).first()
+        if existing_evaluation and existing_evaluation.criteria_set:
+            criteria_set = existing_evaluation.criteria_set
+        elif requested_set_id:
+            criteria_set = get_object_or_404(CriteriaSet, pk=requested_set_id)
+        else:
+            criteria_set = (
+                CriteriaSet.objects.filter(
+                    semester=semester, academic_year=year, is_active=True
+                ).first()
+                or CriteriaSet.objects.filter(is_active=True).first()
+            )
+        if not criteria_set:
+            return Response(
+                {'detail': 'Chưa có bộ tiêu chí nào được quản trị viên kích hoạt.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Create or update evaluation
         evaluation, created = Evaluation.objects.update_or_create(
@@ -546,7 +697,8 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             defaults={
                 'note': note,
                 'status': status_param,
-                'class_confirmed': False
+                'class_confirmed': False,
+                'criteria_set': criteria_set,
             }
         )
 
@@ -558,7 +710,10 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         from .models import SubItem
         for sub_item_id, score_val in scores_data.items():
             try:
-                sub_item = SubItem.objects.get(id=sub_item_id)
+                sub_item = SubItem.objects.get(
+                    id=sub_item_id,
+                    group__criterion__criteria_set=criteria_set
+                )
                 EvaluationDetail.objects.create(
                     evaluation=evaluation,
                     sub_item=sub_item,
@@ -569,7 +724,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
         # Recalculate total score based on parent criteria constraints
         total_score = 0
-        for criterion in Criterion.objects.all():
+        for criterion in criteria_set.criteria.all():
             crit_score = 0
             details = EvaluationDetail.objects.filter(evaluation=evaluation, sub_item__group__criterion=criterion)
             for d in details:

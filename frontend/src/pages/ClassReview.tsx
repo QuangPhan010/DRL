@@ -33,7 +33,7 @@ export default function ClassReview() {
       }
 
       // 1. Fetch criteria to display details
-      const criteriaRes = await fetch(`${API_URL}/criteria/`, { headers });
+      const criteriaRes = await fetch(`${API_URL}/criteria/?all=true`, { headers });
       if (criteriaRes.ok) {
         const criteriaData = await criteriaRes.json();
         setCriteria(criteriaData);
@@ -289,7 +289,7 @@ export default function ClassReview() {
 
               <div className="space-y-4">
                 <p className="font-semibold text-sm border-b pb-2">Chi tiết điểm các tiêu chí chính</p>
-                {criteria.map(c => {
+                {criteria.filter(c => c.criteria_set === selectedEval.criteria_set).map(c => {
                   const sc = selectedEval.scores[c.id] || 0;
                   return (
                     <div key={c.id} className="space-y-1.5">

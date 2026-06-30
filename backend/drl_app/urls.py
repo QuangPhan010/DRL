@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     login_view, change_password_view, ClassInfoViewSet, StudentViewSet, 
-    CriterionViewSet, EvaluationViewSet, ActivityViewSet, UserViewSet,
+    CriteriaSetViewSet, CriterionViewSet, EvaluationViewSet, ActivityViewSet, UserViewSet,
     OrganizationViewSet, UserOrganizationViewSet, ClassPositionViewSet, StudentClassPositionViewSet,
     FraudDetectionViewSet, AuditLogViewSet, ChangeRequestViewSet,
     ExternalActivityViewSet, EvidenceFileViewSet, EvidenceReviewViewSet, FraudFlagViewSet
@@ -11,6 +11,7 @@ from .views import (
 router = DefaultRouter()
 router.register(r'classes', ClassInfoViewSet, basename='class')
 router.register(r'students', StudentViewSet, basename='student')
+router.register(r'criteria-sets', CriteriaSetViewSet, basename='criteria-set')
 router.register(r'criteria', CriterionViewSet, basename='criterion')
 router.register(r'evaluations', EvaluationViewSet, basename='evaluation')
 router.register(r'activities', ActivityViewSet, basename='activity')

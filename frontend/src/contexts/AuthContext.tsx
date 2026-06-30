@@ -33,6 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (user) {
       localStorage.setItem("drl_user", JSON.stringify(user));
+      // MockTokenAuthentication uses a deterministic token. Restore it for
+      // sessions created before token persistence was added.
+      if (!localStorage.getItem("drl_token") && user.username) {
+        localStorage.setItem("drl_token", `mock-token-for-${user.username}`);
+      }
       fetchUsers();
     } else {
       localStorage.removeItem("drl_user");

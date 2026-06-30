@@ -132,14 +132,38 @@ class StudentClassPosition(models.Model):
         return f"{self.student.full_name} - {self.class_info.name}: {self.position.name}"
 
 
+class CriteriaSet(models.Model):
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    semester = models.CharField(max_length=20, blank=True)
+    academic_year = models.CharField(max_length=20, blank=True)
+    effective_from = models.DateField(null=True, blank=True)
+    effective_to = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'criteria_set'
+        ordering = ('-is_active', '-created_at')
+
+    def __str__(self):
+        return self.name
+
+
 class Criterion(models.Model):
-    code = models.CharField(max_length=10, unique=True) # e.g. I, II, III
+    criteria_set = models.ForeignKey(CriteriaSet, on_delete=models.CASCADE, related_name='criteria')
+    code = models.CharField(max_length=10) # e.g. I, II, III
     name = models.CharField(max_length=255)
     max_score = models.IntegerField()
     description = models.TextField(blank=True, null=True)
 
     class Meta:
         db_table = 'criterion'
+        ordering = ('code',)
+        constraints = [
+            models.UniqueConstraint(fields=('criteria_set', 'code'), name='unique_code_per_criteria_set')
+        ]
 
     def __str__(self):
         return f"{self.code}. {self.name}"
@@ -176,6 +200,7 @@ class Evaluation(models.Model):
         ('rejected', 'Bị từ chối'),
     )
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='evaluations')
+    criteria_set = models.ForeignKey(CriteriaSet, on_delete=models.PROTECT, null=True, blank=True, related_name='evaluations')
     semester = models.CharField(max_length=20) # e.g. HK1, HK2
     year = models.CharField(max_length=20) # e.g. 2024-2025
     note = models.TextField(blank=True, null=True)

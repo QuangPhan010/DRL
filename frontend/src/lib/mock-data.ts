@@ -84,6 +84,19 @@ export interface Criterion {
   groups?: GroupCriterion[];
 }
 
+export interface CriteriaSet {
+  id: string;
+  name: string;
+  description: string;
+  semester: string;
+  academicYear: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  isActive: boolean;
+  criteriaCount: number;
+  totalMaxScore: number;
+}
+
 export type EvaluationStatus = "draft" | "class_pending" | "advisor_pending" | "pending" | "approved" | "rejected";
 
 export interface Evaluation {
