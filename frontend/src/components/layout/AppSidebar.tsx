@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { Role } from "@/lib/mock-data";
+import { cn } from "@/lib/utils";
 
 interface NavItem { title: string; url: string; icon: any; roles: Role[]; }
 
@@ -70,9 +71,9 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
-      <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl overflow-hidden bg-background border shadow-sm">
+      <SidebarHeader className={cn("border-b border-sidebar-border transition-all duration-200", collapsed ? "p-1 flex justify-center h-[73px] items-center" : "p-4")}>
+        <div className={cn("flex items-center w-full", collapsed ? "justify-center" : "gap-3")}>
+          <div className={cn("flex shrink-0 items-center justify-center rounded-xl overflow-hidden bg-background border shadow-sm transition-all duration-200", collapsed ? "h-8 w-8" : "h-10 w-10")}>
             <img src="/logo.jpg" alt="ITC Logo" className="h-full w-full object-contain" />
           </div>
           {!collapsed && (
