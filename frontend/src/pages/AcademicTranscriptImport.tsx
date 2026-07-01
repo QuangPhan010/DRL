@@ -177,6 +177,8 @@ export default function AcademicTranscriptImport() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [validating, setValidating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<number | null>(null);
+  const [isImportingAsync, setIsImportingAsync] = useState(false);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<"student_code" | "full_name" | "gpa" | "classification" | "match_status">("student_code");
   const [page, setPage] = useState(1);
@@ -386,12 +388,56 @@ export default function AcademicTranscriptImport() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Import thất bại");
-      setActiveRecord(mapRecord({ ...data, import_id: data.import_id, class_name: data.class_name, selected_class: data.class_name, students: data.students, status: data.status }, data.source_file_name || activeRecord.source_file_name));
-      await fetchHistory();
-      toast.success("Import thành công");
+      
+      const sessionId = data.session_id || activeRecord.id;
+      
+      // Start SSE listening
+      setIsImportingAsync(true);
+      setImportProgress(0);
+      
+      const eventSource = new EventSource(`${API_URL}/transcripts/${sessionId}/stream/`);
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const streamData = JSON.parse(event.data);
+          const progressVal = Number(streamData.progress);
+          
+          if (progressVal === -1 || streamData.status === "FAILED") {
+            toast.error("Import bảng điểm thất bại");
+            eventSource.close();
+            setIsImportingAsync(false);
+            setImportProgress(null);
+            return;
+          }
+          
+          setImportProgress(progressVal);
+          
+          if (progressVal >= 100 || streamData.status === "IMPORTED") {
+            eventSource.close();
+            setIsImportingAsync(false);
+            setImportProgress(null);
+            toast.success("Import thành công!");
+            loadRecordDetail(sessionId);
+            fetchHistory();
+          }
+        } catch (err) {
+          console.error("Error parsing progress:", err);
+        }
+      };
+      
+      eventSource.onerror = (err) => {
+        console.error("Progress stream error:", err);
+        eventSource.close();
+        setIsImportingAsync(false);
+        setImportProgress(null);
+        toast.error("Mất kết nối theo dõi tiến trình, vui lòng tải lại lịch sử.");
+      };
+
     } catch (e) {
       console.error(e);
       toast.error(e instanceof Error ? e.message : "Import thất bại");
+      setIsImportingAsync(false);
+      setImportProgress(null);
     } finally {
       setImporting(false);
     }
@@ -493,7 +539,7 @@ export default function AcademicTranscriptImport() {
           <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 20% 20%, white 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
           <div className="relative p-5 md:p-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="max-w-3xl">
-              <p className="text-white/60 text-[10px] uppercase tracking-[0.2em]">Academic Transcript Import</p>
+              <p className="text-white/60 text-[10px] uppercase tracking-[0.2em]">Nhập bảng điểm PDF</p>
               <h1 className="mt-1 font-display text-xl md:text-2xl font-bold">Nhập điểm từ PDF</h1>
               <p className="mt-1 text-white/70 text-xs max-w-2xl">Vui lòng chọn thông tin học vụ (năm học, học kỳ) và chọn lớp học từ danh sách để bắt đầu nhập điểm.</p>
             </div>
@@ -647,7 +693,7 @@ export default function AcademicTranscriptImport() {
             </Button>
             <div>
               <p className="text-white/60 text-[10px] uppercase tracking-[0.2em] flex items-center gap-1.5">
-                <BookOpen className="h-3 w-3" /> Academic Transcript Import • {activeClass.name}
+                <BookOpen className="h-3 w-3" /> Nhập bảng điểm PDF • {activeClass.name}
               </p>
               <h1 className="font-display text-lg md:text-xl font-bold mt-0.5">Tải lên bảng điểm lớp {activeClass.name}</h1>
               <p className="text-white/70 text-xs mt-0.5">Upload file PDF text, hệ thống tự động đối chiếu MSSV, TBCTK và lưu lịch sử import.</p>
@@ -859,6 +905,36 @@ export default function AcademicTranscriptImport() {
           </Card>
         </div>
       </div>
+      {isImportingAsync && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md border shadow-2xl bg-gradient-card">
+            <CardHeader className="text-center pb-2">
+              <CardTitle className="font-display text-xl flex items-center justify-center gap-2">
+                <RefreshCw className="h-5 w-5 animate-spin text-primary" />
+                Đang xử lý bảng điểm...
+              </CardTitle>
+              <CardDescription>Vui lòng đợi trong giây lát, hệ thống đang đồng bộ dữ liệu điểm.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4">
+              <div className="relative pt-1">
+                <div className="flex mb-2 items-center justify-between text-xs">
+                  <span className="text-primary font-semibold">Tiến trình</span>
+                  <span className="text-primary font-semibold">{importProgress}%</span>
+                </div>
+                <div className="overflow-hidden h-2.5 text-xs flex rounded-full bg-primary/10">
+                  <div
+                    style={{ width: `${importProgress}%` }}
+                    className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-primary transition-all duration-300 ease-out"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground text-center italic">
+                Đang nạp sinh viên và cập nhật CSDL điểm rèn luyện...
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
