@@ -1,7 +1,7 @@
-import { Bell, LogOut, Search } from "lucide-react";
+import { Bell, LogOut, Search, User as UserIcon } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -83,6 +83,7 @@ export function AppHeader() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="h-10 gap-2 px-2">
               <Avatar className="h-8 w-8">
+                {user?.avatar && <AvatarImage src={user.avatar} className="object-cover" />}
                 <AvatarFallback className="bg-gradient-primary text-primary-foreground font-semibold text-xs">
                   {initials}
                 </AvatarFallback>
@@ -101,6 +102,10 @@ export function AppHeader() {
                 <Badge variant="secondary" className="mt-1.5 text-xs">{user && roleLabels[user.role]}</Badge>
               </div>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate("/profile")}>
+              <UserIcon className="mr-2 h-4 w-4" /> Trang cá nhân
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { logout(); toast.success("Đã đăng xuất"); navigate("/login"); }}>
               <LogOut className="mr-2 h-4 w-4" /> Đăng xuất

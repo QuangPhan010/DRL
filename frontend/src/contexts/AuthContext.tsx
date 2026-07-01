@@ -16,6 +16,7 @@ interface AuthCtx {
   login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => void;
   updateUserPassword: (username: string, newPass: string) => Promise<void>;
+  updateProfileContext: (updatedFields: Partial<User>) => void;
   setAllUsers: React.Dispatch<React.SetStateAction<User[]>>;
   fetchUsers: () => Promise<void>;
 }
@@ -66,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           studentId: u.student_id,
           isFirstLogin: u.is_first_login,
           isActive: u.is_active,
+          avatar: localStorage.getItem(`drl_avatar_${u.id}`) || "",
           organizations: u.organizations || []
         }));
         setAllUsers(mapped);
@@ -102,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         studentId: data.user.student_id,
         isFirstLogin: data.is_first_login,
         isActive: true,
+        avatar: localStorage.getItem(`drl_avatar_${data.user.id}`) || "",
         organizations: data.user.organizations || []
       };
 
@@ -156,8 +159,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateProfileContext = (updatedFields: Partial<User>) => {
+    setUser(prev => {
+      if (!prev) return null;
+      const updated = { ...prev, ...updatedFields };
+      if (updatedFields.avatar !== undefined) {
+        localStorage.setItem(`drl_avatar_${prev.id}`, updatedFields.avatar || "");
+      }
+      localStorage.setItem("drl_user", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   return (
-    <Ctx.Provider value={{ user, allUsers, login, logout, updateUserPassword, setAllUsers, fetchUsers }}>
+    <Ctx.Provider value={{ user, allUsers, login, logout, updateUserPassword, updateProfileContext, setAllUsers, fetchUsers }}>
       {children}
     </Ctx.Provider>
   );
