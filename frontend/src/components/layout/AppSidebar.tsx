@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ClipboardList, FileCheck, Settings, GraduationCap, User as UserIcon, Sparkles,
-  CalendarDays, ClipboardCheck, RefreshCw, ShieldAlert, Award, Clock
+  CalendarDays, ClipboardCheck, RefreshCw, ShieldAlert, Award, Clock, FileUp
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -21,6 +21,7 @@ const navItems: NavItem[] = [
   { title: "Rà soát lớp", url: "/class-review", icon: ClipboardCheck, roles: ["class_monitor"] },
   { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "student_affairs", "admin"] },
   { title: "Đồng bộ điểm học tập", url: "/data-sync", icon: RefreshCw, roles: ["academic_affairs", "admin"] },
+  { title: "Academic Transcript Import", url: "/academic-transcript-import", icon: FileUp, roles: ["academic_affairs", "admin"] },
   { title: "Quản lý sinh viên", url: "/students", icon: Users, roles: ["admin", "advisor", "student_affairs", "class_monitor"] },
   { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin", "student_affairs"] },
   { title: "Cấu hình hệ thống", url: "/settings", icon: Settings, roles: ["admin"] },

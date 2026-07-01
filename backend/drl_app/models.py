@@ -420,3 +420,57 @@ class FraudFlag(models.Model):
         db_table = 'fraud_flag'
 
 
+class TranscriptImport(models.Model):
+    class_name = models.CharField(max_length=100)
+    semester = models.CharField(max_length=50, blank=True, null=True)
+    source_file_name = models.CharField(max_length=255, blank=True, default="")
+    total_students = models.PositiveIntegerField(default=0)
+    summary_data = models.JSONField(default=dict, blank=True)
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transcript_imports',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'transcript_import'
+        ordering = ('-uploaded_at', '-id')
+
+    def __str__(self):
+        return f"{self.class_name} - {self.uploaded_at:%Y-%m-%d %H:%M}"
+
+
+class TranscriptImportItem(models.Model):
+    STATUS_CHOICES = (
+        ('MATCHED', 'Matched'),
+        ('NOT_FOUND', 'Not Found'),
+    )
+
+    transcript_import = models.ForeignKey(
+        TranscriptImport,
+        on_delete=models.CASCADE,
+        related_name='items',
+    )
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transcript_import_items',
+    )
+    student_code = models.CharField(max_length=50)
+    full_name = models.CharField(max_length=150, blank=True, default="")
+    gpa = models.DecimalField(max_digits=4, decimal_places=2)
+    classification = models.CharField(max_length=50)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+
+    class Meta:
+        db_table = 'transcript_import_item'
+
+    def __str__(self):
+        return f"{self.student_code} - {self.classification}"
+
+

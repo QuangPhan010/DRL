@@ -7,6 +7,7 @@ from .views import (
     FraudDetectionViewSet, AuditLogViewSet, ChangeRequestViewSet,
     ExternalActivityViewSet, EvidenceFileViewSet, EvidenceReviewViewSet, FraudFlagViewSet
 )
+from .transcript_views import TranscriptImportViewSet
 
 router = DefaultRouter()
 router.register(r'classes', ClassInfoViewSet, basename='class')
@@ -27,6 +28,7 @@ router.register(r'external-activities', ExternalActivityViewSet, basename='exter
 router.register(r'evidence-files', EvidenceFileViewSet, basename='evidence-file')
 router.register(r'evidence-reviews', EvidenceReviewViewSet, basename='evidence-review')
 router.register(r'fraud-flags', FraudFlagViewSet, basename='fraud-flag')
+router.register(r'transcripts', TranscriptImportViewSet, basename='transcript-import')
 
 urlpatterns = [
     path('login/', login_view, name='login'),

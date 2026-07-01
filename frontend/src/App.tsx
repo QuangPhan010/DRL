@@ -17,6 +17,7 @@ import ActivityDetail from "./pages/ActivityDetail";
 import ActivityForm from "./pages/ActivityForm";
 import ClassReview from "./pages/ClassReview";
 import DataSync from "./pages/DataSync";
+import AcademicTranscriptImport from "./pages/AcademicTranscriptImport";
 import Classes from "./pages/Classes";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
@@ -46,6 +47,7 @@ const App = () => (
               <Route path="/activities/:id/edit" element={<ActivityForm />} />
               <Route path="/class-review" element={<ClassReview />} />
               <Route path="/data-sync" element={<DataSync />} />
+              <Route path="/academic-transcript-import" element={<AcademicTranscriptImport />} />
               <Route path="/profile" element={<Profile />} />
             </Route>
 
