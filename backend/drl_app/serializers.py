@@ -110,6 +110,7 @@ class EvaluationDetailSerializer(serializers.ModelSerializer):
 
 class EvaluationSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.full_name', read_only=True)
+    student_id = serializers.CharField(source='student.student_id', read_only=True)
     class_name = serializers.CharField(source='student.class_info.name', read_only=True)
     details = EvaluationDetailSerializer(many=True, read_only=True)
     scores = serializers.SerializerMethodField()
@@ -118,7 +119,9 @@ class EvaluationSerializer(serializers.ModelSerializer):
         model = Evaluation
         fields = (
             'id', 'student', 'student_name', 'class_name', 'student_id',
-            'semester', 'year', 'note', 'total_score', 'classification',
+            'semester', 'year', 'note', 'academic_gpa', 'academic_classification',
+            'raw_score', 'base_score', 'carry_in', 'carry_out', 'surplus_balance',
+            'total_score', 'classification',
             'status', 'submitted_at', 'reviewed_by', 'review_note',
             'class_confirmed', 'criteria_set', 'details', 'scores'
         )

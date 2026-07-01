@@ -204,6 +204,13 @@ class Evaluation(models.Model):
     semester = models.CharField(max_length=20) # e.g. HK1, HK2
     year = models.CharField(max_length=20) # e.g. 2024-2025
     note = models.TextField(blank=True, null=True)
+    academic_gpa = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    academic_classification = models.CharField(max_length=50, blank=True, null=True)
+    raw_score = models.IntegerField(default=0)
+    base_score = models.IntegerField(default=0)
+    carry_in = models.IntegerField(default=0)
+    carry_out = models.IntegerField(default=0)
+    surplus_balance = models.IntegerField(default=0)
     total_score = models.IntegerField(default=0)
     classification = models.CharField(max_length=50, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')

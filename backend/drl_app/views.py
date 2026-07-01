@@ -628,6 +628,95 @@ class CriterionViewSet(viewsets.ModelViewSet):
             )
         return super().destroy(request, *args, **kwargs)
 
+def classify_training_score(total_score):
+    if total_score >= 90:
+        return "Xuất sắc"
+    if total_score >= 80:
+        return "Tốt"
+    if total_score >= 65:
+        return "Khá"
+    if total_score >= 50:
+        return "Trung bình"
+    if total_score >= 35:
+        return "Yếu"
+    return "Kém"
+
+
+@transaction.atomic
+def rebalance_training_score(student):
+    """Move surplus points to the nearest deficient semester.
+
+    A later surplus first repairs previous semesters. If previous semesters
+    are already full, it remains available for the next deficient semester.
+    """
+    semester_order = {'HK1': 1, 'HK2': 2, 'HK3': 3}
+    evaluations = list(
+        Evaluation.objects.filter(student=student).select_related('criteria_set')
+    )
+    evaluations.sort(
+        key=lambda item: (
+            item.year.split('-')[0] if item.year else '',
+            semester_order.get(item.semester, 99),
+            item.id,
+        )
+    )
+
+    states = []
+    for evaluation in evaluations:
+        maximum = sum(
+            criterion.max_score
+            for criterion in evaluation.criteria_set.criteria.all()
+        ) if evaluation.criteria_set else 100
+        base_score = max(0, min(maximum, evaluation.raw_score))
+        states.append({
+            'evaluation': evaluation,
+            'maximum': maximum,
+            'base': base_score,
+            'deficit': max(0, maximum - base_score),
+            'surplus': max(0, evaluation.raw_score - maximum),
+            'carry_in': 0,
+            'carry_out': 0,
+        })
+
+    for source_index, source in enumerate(states):
+        available = source['surplus']
+        if available <= 0:
+            continue
+
+        # Newer surplus repairs the closest previous deficient semester first.
+        target_indexes = list(range(source_index - 1, -1, -1))
+        # Any remaining balance is reserved for the following semesters.
+        target_indexes += list(range(source_index + 1, len(states)))
+        for target_index in target_indexes:
+            target = states[target_index]
+            if target['deficit'] <= 0:
+                continue
+            transferred = min(available, target['deficit'])
+            target['deficit'] -= transferred
+            target['carry_in'] += transferred
+            source['carry_out'] += transferred
+            available -= transferred
+            if available <= 0:
+                break
+        source['surplus_balance'] = available
+
+    for state in states:
+        evaluation = state['evaluation']
+        evaluation.base_score = state['base']
+        evaluation.carry_in = state['carry_in']
+        evaluation.carry_out = state['carry_out']
+        evaluation.surplus_balance = state.get('surplus_balance', 0)
+        evaluation.total_score = min(
+            state['maximum'],
+            state['base'] + state['carry_in'],
+        )
+        evaluation.classification = classify_training_score(evaluation.total_score)
+        evaluation.save(update_fields=(
+            'base_score', 'carry_in', 'carry_out', 'surplus_balance',
+            'total_score', 'classification',
+        ))
+
+
 # 5. Evaluation ViewSet
 class EvaluationViewSet(viewsets.ModelViewSet):
     queryset = Evaluation.objects.all()
@@ -668,6 +757,12 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         year = request.data.get('year')
         scores_data = request.data.get('scores', {}) # dict of subitem_id -> score
         note = request.data.get('note', '')
+        academic_gpa = request.data.get('academicGpa', request.data.get('academic_gpa'))
+        academic_classification = request.data.get(
+            'academicClassification',
+            request.data.get('academic_classification', '')
+        )
+        requested_raw_score = request.data.get('rawScore', request.data.get('raw_score'))
         status_param = request.data.get('status', 'draft')
         requested_set_id = request.data.get('criteriaSet') or request.data.get('criteria_set')
 
@@ -696,6 +791,8 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             student=student, semester=semester, year=year,
             defaults={
                 'note': note,
+                'academic_gpa': academic_gpa if academic_gpa not in ('', None) else None,
+                'academic_classification': academic_classification or '',
                 'status': status_param,
                 'class_confirmed': False,
                 'criteria_set': criteria_set,
@@ -732,23 +829,16 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             # Clamp between 0 and max_score
             total_score += max(0, min(criterion.max_score, crit_score))
 
+        evaluation.raw_score = max(
+            total_score,
+            int(float(requested_raw_score)) if requested_raw_score not in (None, '') else total_score,
+        )
+        evaluation.base_score = total_score
         evaluation.total_score = total_score
-        
-        # Classify
-        if total_score >= 90:
-            evaluation.classification = "Xuất sắc"
-        elif total_score >= 80:
-            evaluation.classification = "Tốt"
-        elif total_score >= 65:
-            evaluation.classification = "Khá"
-        elif total_score >= 50:
-            evaluation.classification = "Trung bình"
-        elif total_score >= 35:
-            evaluation.classification = "Yếu"
-        else:
-            evaluation.classification = "Kém"
-
+        evaluation.classification = classify_training_score(total_score)
         evaluation.save()
+        rebalance_training_score(student)
+        evaluation.refresh_from_db()
         return Response(EvaluationSerializer(evaluation).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='review')
