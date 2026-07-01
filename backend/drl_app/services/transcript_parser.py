@@ -170,8 +170,8 @@ def _extract_from_tables(tables: list[list[list[str]]]) -> dict[str, TranscriptR
                 continue
             student_code = row[code_index].strip()
             gpa = _to_decimal(row[gpa_index])
-        if not student_code or gpa is None:
-            continue
+            if not student_code or gpa is None:
+                continue
 
             full_name = row[name_index].strip() if name_index is not None and name_index < len(row) else ""
             rows[student_code] = TranscriptRow(

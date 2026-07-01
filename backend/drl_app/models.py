@@ -421,11 +421,22 @@ class FraudFlag(models.Model):
 
 
 class TranscriptImport(models.Model):
-    class_name = models.CharField(max_length=100)
+    STATUS_CHOICES = (
+        ('VALIDATED', 'Validated'),
+        ('IMPORTED', 'Imported'),
+        ('FAILED', 'Failed'),
+    )
+
+    class_info = models.ForeignKey(
+        ClassInfo,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transcript_imports',
+    )
+    class_name = models.CharField(max_length=100, blank=True, default="")
+    school_year = models.CharField(max_length=50, blank=True, default="")
     semester = models.CharField(max_length=50, blank=True, null=True)
-    source_file_name = models.CharField(max_length=255, blank=True, default="")
-    total_students = models.PositiveIntegerField(default=0)
-    summary_data = models.JSONField(default=dict, blank=True)
     uploaded_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -434,19 +445,28 @@ class TranscriptImport(models.Model):
         related_name='transcript_imports',
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    original_filename = models.CharField(max_length=255, blank=True, default="")
+    pdf_class_name = models.CharField(max_length=100, blank=True, default="")
+    total_students = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='VALIDATED')
+    preview_data = models.JSONField(default=list, blank=True)
+    summary_data = models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = 'transcript_import'
         ordering = ('-uploaded_at', '-id')
 
     def __str__(self):
-        return f"{self.class_name} - {self.uploaded_at:%Y-%m-%d %H:%M}"
+        label = self.class_name or (self.class_info.name if self.class_info else "")
+        return f"{label} - {self.uploaded_at:%Y-%m-%d %H:%M}"
 
 
 class TranscriptImportItem(models.Model):
     STATUS_CHOICES = (
         ('MATCHED', 'Matched'),
         ('NOT_FOUND', 'Not Found'),
+        ('CLASS_MISMATCH', 'Class Mismatch'),
+        ('DUPLICATE', 'Duplicate'),
     )
 
     transcript_import = models.ForeignKey(
@@ -466,6 +486,8 @@ class TranscriptImportItem(models.Model):
     gpa = models.DecimalField(max_digits=4, decimal_places=2)
     classification = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    match_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='MATCHED')
+    remark = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         db_table = 'transcript_import_item'

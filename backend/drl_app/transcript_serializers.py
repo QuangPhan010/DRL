@@ -20,6 +20,8 @@ class TranscriptImportItemSerializer(serializers.ModelSerializer):
             'gpa',
             'classification',
             'status',
+            'match_status',
+            'remark',
         )
 
     def get_resolved_full_name(self, obj):
@@ -33,18 +35,31 @@ class TranscriptImportBaseSerializer(serializers.ModelSerializer):
     item_count = serializers.IntegerField(source='total_students', read_only=True)
     summary = serializers.SerializerMethodField()
     summary_percent = serializers.SerializerMethodField()
+    valid = serializers.SerializerMethodField()
+    class_match = serializers.SerializerMethodField()
+    class_id = serializers.IntegerField(source='class_info.id', read_only=True)
+    selected_class = serializers.CharField(source='class_info.name', read_only=True)
+    source_file_name = serializers.CharField(source='original_filename', read_only=True)
 
     class Meta:
         model = TranscriptImport
         fields = (
             'id',
+            'class_id',
             'class_name',
+            'selected_class',
             'semester',
+            'school_year',
             'source_file_name',
+            'original_filename',
+            'pdf_class_name',
             'item_count',
             'uploaded_by',
             'uploaded_by_name',
             'uploaded_at',
+            'status',
+            'valid',
+            'class_match',
             'summary',
             'summary_percent',
         )
@@ -71,6 +86,20 @@ class TranscriptImportBaseSerializer(serializers.ModelSerializer):
         _, percentages = self._summary_payload(obj)
         return percentages
 
+    def get_valid(self, obj):
+        summary_data = obj.summary_data or {}
+        value = summary_data.get('valid')
+        if value is not None:
+            return value
+        return obj.status == 'IMPORTED'
+
+    def get_class_match(self, obj):
+        summary_data = obj.summary_data or {}
+        value = summary_data.get('class_match')
+        if value is not None:
+            return value
+        return None
+
 
 class TranscriptImportListSerializer(TranscriptImportBaseSerializer):
     class Meta(TranscriptImportBaseSerializer.Meta):
@@ -82,4 +111,3 @@ class TranscriptImportDetailSerializer(TranscriptImportBaseSerializer):
 
     class Meta(TranscriptImportBaseSerializer.Meta):
         fields = TranscriptImportBaseSerializer.Meta.fields + ('items',)
-
