@@ -24,6 +24,43 @@ export default function ActivityDetail() {
   const isAdvisor = userRoles.includes("advisor");
   const isCTSV = userRoles.includes("student_affairs") || userRoles.includes("admin");
 
+  const canReviewAttendance = (act: any) => {
+    if (!user || !act) return false;
+    // Admin / CTSV / Phòng Đào tạo luôn có quyền
+    const isStaff = userRoles.includes("admin") || userRoles.includes("student_affairs") || userRoles.includes("academic_affairs");
+    if (isStaff) return true;
+    
+    // Đơn vị tổ chức trực tiếp (khớp tên)
+    if (act.organizer === user.fullName) return true;
+
+    // Đơn vị tổ chức (khớp tổ chức của user)
+    const userOrgs = user.organizations || [];
+    const isFromOrganizingUnit = userOrgs.some((org: any) => org.organization_name === act.organizer);
+    if (isFromOrganizingUnit) return true;
+
+    // Người đồng tổ chức (Các CLB được liên kết)
+    if (act.scope_type === "club") {
+      const isLinkedClubLeader = userOrgs.some((org: any) => {
+        const isLeader = ["Chủ nhiệm", "Phó chủ nhiệm", "Trưởng ban", "Phụ trách"].includes(org.position);
+        const allowedClubIds = act.allowed_clubs || [];
+        const isClubAllowed = allowedClubIds.includes(Number(org.organization)) || allowedClubIds.includes(org.organization?.toString());
+        return isLeader && isClubAllowed;
+      });
+      if (isLinkedClubLeader) return true;
+    }
+
+    // Người đồng tổ chức (Các Lớp được liên kết)
+    if (act.scope_type === "class") {
+      const allowedClassIds = act.allowed_classes || [];
+      const isClassOfficer = userRoles.includes("class_officer") || userRoles.includes("advisor");
+      const userClassId = user.classId || user.class_info?.id;
+      const isLinkedClassLeader = isClassOfficer && userClassId && allowedClassIds.includes(Number(userClassId));
+      if (isLinkedClassLeader) return true;
+    }
+
+    return false;
+  };
+
   const [loading, setLoading] = useState(true);
   const [isExternal, setIsExternal] = useState(false);
   const [activity, setActivity] = useState<any>(null);
@@ -449,7 +486,7 @@ export default function ActivityDetail() {
               </div>
 
               {/* Internal checkins history */}
-              {!isExternal && !isStudent && (
+              {!isExternal && !isStudent && canReviewAttendance(activity) && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h3 className="font-display font-bold flex items-center gap-2">
@@ -513,6 +550,14 @@ export default function ActivityDetail() {
                       )}
                     </TableBody>
                   </Table>
+                </div>
+              )}
+
+              {!isExternal && !isStudent && !canReviewAttendance(activity) && (
+                <div className="p-4 rounded-xl border bg-muted/20 text-center py-8">
+                  <p className="text-sm text-muted-foreground italic">
+                    Chỉ có đơn vị tổ chức và người đồng tổ chức mới có quyền rà soát danh sách điểm danh của hoạt động này.
+                  </p>
                 </div>
               )}
 

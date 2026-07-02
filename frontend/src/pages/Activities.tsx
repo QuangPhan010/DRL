@@ -24,6 +24,43 @@ export default function Activities() {
   const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const [activities, setActivities] = useState<Activity[]>([]);
 
+  const canReviewAttendance = (act: any) => {
+    if (!user || !act) return false;
+    // Admin / CTSV / Phòng Đào tạo luôn có quyền
+    const isStaff = userRoles.includes("admin") || userRoles.includes("student_affairs") || userRoles.includes("academic_affairs");
+    if (isStaff) return true;
+    
+    // Đơn vị tổ chức trực tiếp (khớp tên)
+    if (act.organizer === user.fullName) return true;
+
+    // Đơn vị tổ chức (khớp tổ chức của user)
+    const userOrgs = user.organizations || [];
+    const isFromOrganizingUnit = userOrgs.some((org: any) => org.organization_name === act.organizer);
+    if (isFromOrganizingUnit) return true;
+
+    // Người đồng tổ chức (Các CLB được liên kết)
+    if (act.scope_type === "club") {
+      const isLinkedClubLeader = userOrgs.some((org: any) => {
+        const isLeader = ["Chủ nhiệm", "Phó chủ nhiệm", "Trưởng ban", "Phụ trách"].includes(org.position);
+        const allowedClubIds = act.allowed_clubs || [];
+        const isClubAllowed = allowedClubIds.includes(Number(org.organization)) || allowedClubIds.includes(org.organization?.toString());
+        return isLeader && isClubAllowed;
+      });
+      if (isLinkedClubLeader) return true;
+    }
+
+    // Người đồng tổ chức (Các Lớp được liên kết)
+    if (act.scope_type === "class") {
+      const allowedClassIds = act.allowed_classes || [];
+      const isClassOfficer = userRoles.includes("class_officer") || userRoles.includes("advisor");
+      const userClassId = user.classId || user.class_info?.id;
+      const isLinkedClassLeader = isClassOfficer && userClassId && allowedClassIds.includes(Number(userClassId));
+      if (isLinkedClassLeader) return true;
+    }
+
+    return false;
+  };
+
   const parseDateTime = (dateStr?: string, timeStr?: string) => {
     if (!dateStr || !timeStr) return null;
     const parts = dateStr.split('-');
@@ -738,21 +775,29 @@ export default function Activities() {
                       {!userRoles.includes("student") && (
                         <div className="flex flex-wrap gap-2 w-full justify-between items-center mt-2">
                           <div className="flex gap-1.5">
-                            <Button size="xs" variant="outline" className="gap-1 border-primary/20 text-primary h-8 px-2" onClick={() => { setSelectedActivity(act); setIsQrOpen(true); }}>
-                              <QrCode className="h-3.5 w-3.5" /> Mã QR
-                            </Button>
-                            <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
-                              Danh sách ({act.participants.length})
-                            </Button>
+                            {canReviewAttendance(act) ? (
+                              <>
+                                <Button size="xs" variant="outline" className="gap-1 border-primary/20 text-primary h-8 px-2" onClick={() => { setSelectedActivity(act); setIsQrOpen(true); }}>
+                                  <QrCode className="h-3.5 w-3.5" /> Mã QR
+                                </Button>
+                                <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
+                                  Danh sách ({act.participants.length})
+                                </Button>
+                              </>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">Chỉ đơn vị tổ chức được rà soát</span>
+                            )}
                           </div>
-                          <div className="flex gap-1.5">
-                            <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => navigate(`/activities/${act.id}/edit`)}>
-                              Sửa
-                            </Button>
-                            <Button size="xs" className="h-8 px-2 text-red-600 border border-red-200 bg-transparent hover:bg-red-50 hover:text-red-700 transition-colors" onClick={() => handleDeleteActivity(act.id)}>
-                              Xóa
-                            </Button>
-                          </div>
+                          {canReviewAttendance(act) && (
+                            <div className="flex gap-1.5">
+                              <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => navigate(`/activities/${act.id}/edit`)}>
+                                Sửa
+                              </Button>
+                              <Button size="xs" className="h-8 px-2 text-red-600 border border-red-200 bg-transparent hover:bg-red-50 hover:text-red-700 transition-colors" onClick={() => handleDeleteActivity(act.id)}>
+                                Xóa
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
