@@ -9,7 +9,7 @@ from .transcript_statistics import build_summary
 
 
 def validate_transcript_upload(*, uploaded_file, class_info: ClassInfo, school_year: str, semester: str | None, uploaded_by=None):
-    parsed = parse_transcript_pdf(uploaded_file)
+    parsed = parse_transcript_pdf(uploaded_file, expected_class_name=class_info.name)
     preview_items, class_match = build_transcript_preview(parsed.rows, selected_class=class_info, pdf_class_name=parsed.class_name)
     summary_counts, summary_percent, total = build_summary(preview_items)
     valid = bool(class_match)

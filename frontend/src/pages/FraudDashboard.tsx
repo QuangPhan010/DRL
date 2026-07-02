@@ -138,28 +138,6 @@ export default function FraudDashboard() {
     }
   };
 
-  const handleRequestResubmit = async (id: string) => {
-    try {
-      const token = localStorage.getItem("drl_token");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-      const res = await fetch(`${API_URL}/fraud-detections/${id}/request-resubmit/`, {
-        method: "POST",
-        headers
-      });
-      if (res.ok) {
-        toast.success("Đã yêu cầu sinh viên gửi lại ảnh selfie minh chứng!");
-        fetchData();
-      } else {
-        toast.error("Không thể gửi yêu cầu");
-      }
-    } catch (err) {
-      toast.error("Lỗi kết nối máy chủ");
-    }
-  };
-
   const handleRunRandomAudit = async () => {
     try {
       const token = localStorage.getItem("drl_token");
@@ -238,7 +216,7 @@ export default function FraudDashboard() {
             <ShieldAlert className="h-8 w-8 text-destructive" /> Giám sát & Chống gian lận
           </h1>
           <p className="text-muted-foreground mt-1">
-            Phát hiện bất thường GPS check-in và tự động rà soát cảnh báo trùng lặp minh chứng ngoài trường.
+            Theo dõi xác thực Face ID khi check-in và tự động rà soát cảnh báo trùng lặp minh chứng ngoài trường.
           </p>
         </div>
         <Button onClick={fetchData} variant="outline" className="gap-2 self-start sm:self-center">
@@ -455,7 +433,7 @@ export default function FraudDashboard() {
           <CardHeader className="border-b pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
               <CardTitle className="font-display flex items-center gap-2 text-destructive">
-                <AlertTriangle className="h-5 w-5" /> Nhật ký Nghi vấn Check-in GPS/Selfie
+                <AlertTriangle className="h-5 w-5" /> Nhật ký Nghi vấn Check-in Face ID
               </CardTitle>
               <CardDescription>Danh sách cảnh báo check-in/out tự động của hoạt động nội bộ.</CardDescription>
             </div>
@@ -493,18 +471,7 @@ export default function FraudDashboard() {
                     <TableCell>{getSeverityBadge(f.severity)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{f.description}</TableCell>
                     <TableCell className="text-xs font-mono">{f.created_at ? new Date(f.created_at).toLocaleString() : "Vừa xong"}</TableCell>
-                    <TableCell className="text-right">
-                      {f.rule_code === "RULE_4" && (
-                        <Button 
-                          size="xs" 
-                          onClick={() => handleRequestResubmit(f.id)} 
-                          disabled={f.description.includes("Đã yêu cầu gửi lại")}
-                          className="bg-primary text-white hover:bg-primary/90 text-xs px-2.5 py-1 h-7"
-                        >
-                          {f.description.includes("Đã yêu cầu gửi lại") ? "Đang chờ gửi lại" : "Yêu cầu gửi lại"}
-                        </Button>
-                      )}
-                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">—</TableCell>
                   </TableRow>
                 ))}
                 {filteredFrauds.length === 0 && (

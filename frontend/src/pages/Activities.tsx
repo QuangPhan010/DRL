@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, MapPin, Eye } from "lucide-react";
+import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -15,6 +15,8 @@ import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExternalActivities from "./ExternalActivities";
+import FaceVerificationCamera, { FaceVerificationData } from "@/components/FaceVerificationCamera";
+import { getFreshAttendanceLocation, GpsPosition } from "@/lib/geolocation";
 
 export default function Activities() {
   const navigate = useNavigate();
@@ -80,59 +82,33 @@ export default function Activities() {
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [isCheckInSimOpen, setIsCheckInSimOpen] = useState(false);
   const [isCheckOutSimOpen, setIsCheckOutSimOpen] = useState(false);
-  const [simLat, setSimLat] = useState("10.850100");
-  const [simLon, setSimLon] = useState("106.771200");
-  const [simSelfie, setSimSelfie] = useState("selfie_sim.png");
   const [simDeviceId, setSimDeviceId] = useState("phone_device_sim");
+  const [faceVerification, setFaceVerification] = useState<FaceVerificationData | null>(null);
+  const [gpsPosition, setGpsPosition] = useState<GpsPosition | null>(null);
+
+  const handleFaceVerified = async (data: FaceVerificationData | null) => {
+    setFaceVerification(null);
+    setGpsPosition(null);
+    if (!data) return;
+    const gps = await getFreshAttendanceLocation();
+    setGpsPosition(gps);
+    setFaceVerification(data);
+  };
 
   const openCheckInSim = (act: Activity) => {
     setSelectedActivity(act);
-    setSimLat(act.latitude ? act.latitude.toString() : "10.850100");
-    setSimLon(act.longitude ? act.longitude.toString() : "106.771200");
-    setSimSelfie("selfie_sv_in.png");
     setSimDeviceId("device_" + (user?.studentId || "SV001"));
+    setFaceVerification(null);
+    setGpsPosition(null);
     setIsCheckInSimOpen(true);
   };
 
   const openCheckOutSim = (act: Activity) => {
     setSelectedActivity(act);
-    setSimLat(act.latitude ? act.latitude.toString() : "10.850100");
-    setSimLon(act.longitude ? act.longitude.toString() : "106.771200");
-    setSimSelfie("selfie_sv_out.png");
     setSimDeviceId("device_" + (user?.studentId || "SV001"));
+    setFaceVerification(null);
+    setGpsPosition(null);
     setIsCheckOutSimOpen(true);
-  };
-
-  const getRealLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error("Trình duyệt không hỗ trợ Geolocation định vị.");
-      return;
-    }
-    toast.info("Đang yêu cầu truy cập vị trí thiết bị...");
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setSimLat(position.coords.latitude.toFixed(6));
-        setSimLon(position.coords.longitude.toFixed(6));
-        toast.success("Lấy tọa độ thực tế thành công!");
-      },
-      (error) => {
-        console.error("Lỗi lấy GPS:", error);
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            toast.error("Bạn đã từ chối quyền định vị GPS.");
-            break;
-          case error.POSITION_UNAVAILABLE:
-            toast.error("Vị trí không khả dụng.");
-            break;
-          case error.TIMEOUT:
-            toast.error("Hết hạn thời gian tìm vị trí.");
-            break;
-          default:
-            toast.error("Lỗi xác định vị trí thực tế.");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
   };
 
   const getCheckoutStatus = (act: Activity) => {
@@ -144,7 +120,7 @@ export default function Activities() {
     const remainingMins = duration - elapsedMins;
 
     if (remainingMins <= 10) {
-      return { enabled: true, text: `Check-out GPS (${remainingMins > 0 ? remainingMins : 0}p)`, remaining: remainingMins };
+      return { enabled: true, text: `Check-out Face ID (${remainingMins > 0 ? remainingMins : 0}p)`, remaining: remainingMins };
     }
     return {
       enabled: false,
@@ -549,6 +525,10 @@ export default function Activities() {
   const handleCheckInSim = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedActivity) return;
+    if (!faceVerification || !gpsPosition) {
+      toast.error("Vui lòng xác thực khuôn mặt và GPS trước.");
+      return;
+    }
     try {
       const token = localStorage.getItem("drl_token");
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -560,18 +540,15 @@ export default function Activities() {
         method: "POST",
         headers,
         body: JSON.stringify({
-          studentId: user?.studentId || "SV001",
-          latitude: parseFloat(simLat),
-          longitude: parseFloat(simLon),
-          selfieFileId: simSelfie,
+          ...faceVerification,
+          ...gpsPosition,
           deviceId: simDeviceId,
-          ipAddress: "127.0.0.1"
         })
       });
       const responseText = await res.text();
       if (res.ok) {
         const data = JSON.parse(responseText);
-        toast.success(`Check-in thành công! Sai số GPS: ${data.distance_meters.toFixed(1)}m.`);
+        toast.success(`Check-in Face ID thành công! Độ tương đồng ${Math.round(data.face_similarity * 100)}%.`);
         fetchActivities();
         setIsCheckInSimOpen(false);
       } else {
@@ -587,6 +564,10 @@ export default function Activities() {
   const handleCheckOutSim = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedActivity) return;
+    if (!faceVerification || !gpsPosition) {
+      toast.error("Vui lòng xác thực khuôn mặt và GPS trước.");
+      return;
+    }
     try {
       const token = localStorage.getItem("drl_token");
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -598,19 +579,15 @@ export default function Activities() {
         method: "POST",
         headers,
         body: JSON.stringify({
-          studentId: user?.studentId || "SV001",
-          latitude: parseFloat(simLat),
-          longitude: parseFloat(simLon),
-          selfieFileId: simSelfie,
+          ...faceVerification,
+          ...gpsPosition,
           deviceId: simDeviceId,
-          ipAddress: "127.0.0.1"
         })
       });
       const responseText = await res.text();
       if (res.ok) {
         const data = JSON.parse(responseText);
-        const distText = data.distance_meters !== undefined ? ` Sai số GPS: ${Number(data.distance_meters).toFixed(1)}m.` : "";
-        toast.success(`Check-out thành công!${distText}`);
+        toast.success(`Check-out Face ID thành công! Độ tương đồng ${Math.round(data.face_similarity * 100)}%.`);
         fetchActivities();
         setIsCheckOutSimOpen(false);
       } else {
@@ -1207,111 +1184,45 @@ export default function Activities() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Simulate Check-In (GPS + Selfie) */}
+      {/* Dialog: Check-In Face ID */}
       <Dialog open={isCheckInSimOpen} onOpenChange={setIsCheckInSimOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              <MapPin className="h-5 w-5 text-success" /> Điểm danh hoạt động (Check-in)
+              Điểm danh hoạt động bằng Face ID
             </DialogTitle>
-            <DialogDescription>Xác thực vị trí GPS và ảnh chụp Selfie thực tế của bạn để hoàn tất điểm danh vào hoạt động.</DialogDescription>
+            <DialogDescription>Quét khuôn mặt trực tiếp và đối chiếu với ảnh đại diện của tài khoản.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCheckInSim} className="space-y-4">
-
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={getRealLocation}
-              className="w-full gap-2 border-primary text-primary h-9 text-xs"
-            >
-              <MapPin className="h-3.5 w-3.5" /> Sử dụng Vị trí Thực tế của thiết bị
-            </Button>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="simLat">Kinh độ (Latitude)</Label>
-                <Input id="simLat" value={simLat} readOnly disabled className="bg-muted text-muted-foreground font-mono" required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="simLon">Vĩ độ (Longitude)</Label>
-                <Input id="simLon" value={simLon} readOnly disabled className="bg-muted text-muted-foreground font-mono" required />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="simSelfie">Ảnh chụp Selfie minh chứng (Chụp ảnh hoặc từ Album) *</Label>
-              <Input
-                id="simSelfie"
-                type="file"
-                accept="image/*"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  setSimSelfie(file ? file.name : "");
-                }}
-              />
-            </div>
+            <FaceVerificationCamera avatar={user?.avatar} onVerified={handleFaceVerified} />
 
             <input id="simDeviceId" type="hidden" value={simDeviceId} />
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCheckInSimOpen(false)}>Hủy</Button>
-              <Button type="submit" className="bg-success text-white hover:bg-success/90">Gửi Check-in</Button>
+              <Button type="submit" disabled={!faceVerification || !gpsPosition} className="bg-success text-white hover:bg-success/90">Xác nhận Check-in</Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Simulate Check-Out (GPS) */}
+      {/* Dialog: Check-Out Face ID */}
       <Dialog open={isCheckOutSimOpen} onOpenChange={setIsCheckOutSimOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              <MapPin className="h-5 w-5 text-warning" /> Điểm danh kết thúc (Check-out)
+              Điểm danh kết thúc bằng Face ID
             </DialogTitle>
-            <DialogDescription>Xác thực vị trí GPS và ảnh chụp Selfie của bạn để hoàn tất thời gian tham gia hoạt động.</DialogDescription>
+            <DialogDescription>Quét lại khuôn mặt để xác nhận người tham gia khi kết thúc hoạt động.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCheckOutSim} className="space-y-4">
-
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={getRealLocation}
-              className="w-full gap-2 border-primary text-primary h-9 text-xs"
-            >
-              <MapPin className="h-3.5 w-3.5" /> Sử dụng Vị trí Thực tế của thiết bị
-            </Button>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="simLatOut">Kinh độ (Latitude)</Label>
-                <Input id="simLatOut" value={simLat} readOnly disabled className="bg-muted text-muted-foreground font-mono" required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="simLonOut">Vĩ độ (Longitude)</Label>
-                <Input id="simLonOut" value={simLon} readOnly disabled className="bg-muted text-muted-foreground font-mono" required />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="simSelfieOut">Ảnh chụp Selfie xác nhận *</Label>
-              <Input
-                id="simSelfieOut"
-                type="file"
-                accept="image/*"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  setSimSelfie(file ? file.name : "");
-                }}
-              />
-            </div>
+            <FaceVerificationCamera avatar={user?.avatar} onVerified={handleFaceVerified} />
 
             <input id="simDeviceIdOut" type="hidden" value={simDeviceId} />
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCheckOutSimOpen(false)}>Hủy</Button>
-              <Button type="submit" className="bg-warning text-black dark:text-white hover:bg-warning/90">Gửi Check-out</Button>
+              <Button type="submit" disabled={!faceVerification || !gpsPosition} className="bg-warning text-black dark:text-white hover:bg-warning/90">Xác nhận Check-out</Button>
             </DialogFooter>
           </form>
         </DialogContent>

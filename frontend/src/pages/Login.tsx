@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { User } from "@/lib/mock-data";
+import { requestLocationAtLogin } from "@/lib/geolocation";
 
 export default function Login() {
   const { user, login, updateUserPassword } = useAuth();
@@ -23,6 +24,15 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   if (user) return <Navigate to="/" replace />;
+
+  const requestLoginGps = async () => {
+    try {
+      await requestLocationAtLogin();
+      toast.success("Đã cấp quyền và xác định vị trí GPS.");
+    } catch (error) {
+      toast.warning(error instanceof Error ? error.message : "Chưa thể lấy vị trí GPS.");
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,6 +53,7 @@ export default function Login() {
     }
 
     if (res.user) {
+      await requestLoginGps();
       toast.success(`Chào mừng, ${res.user.fullName}`);
       navigate("/");
     } else {
@@ -50,7 +61,7 @@ export default function Login() {
     }
   };
 
-  const handleResetPasswordSubmit = (e: React.FormEvent) => {
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPassword || newPassword.length < 6) {
       toast.error("Mật khẩu mới phải từ 6 ký tự trở lên");
@@ -61,7 +72,8 @@ export default function Login() {
       return;
     }
     if (tempUser) {
-      updateUserPassword(tempUser.username, newPassword);
+      await updateUserPassword(tempUser.username, newPassword);
+      await requestLoginGps();
       toast.success("Đổi mật khẩu thành công! Hệ thống đang tự động đăng nhập...");
       setShowResetDialog(false);
       navigate("/");

@@ -26,6 +26,11 @@ class User(AbstractUser):
     student_id = models.CharField(max_length=50, blank=True, null=True, unique=True)
     is_first_login = models.BooleanField(default=True)
     plain_password = models.CharField(max_length=128, blank=True, null=True)
+    # The avatar is the only enrolled face for attendance verification.
+    # The descriptor is generated from that avatar and is never used to search
+    # across other users.
+    avatar = models.TextField(blank=True, default='')
+    avatar_embedding = models.JSONField(blank=True, null=True)
 
     objects = CustomUserManager()
 
@@ -285,7 +290,11 @@ class ActivityCheckIn(models.Model):
     check_in_time = models.DateTimeField(auto_now_add=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    gps_accuracy = models.FloatField(null=True, blank=True)
     selfie_file_id = models.CharField(max_length=255, blank=True, null=True)
+    face_similarity = models.FloatField(null=True, blank=True)
+    face_liveness = models.FloatField(null=True, blank=True)
+    face_realness = models.FloatField(null=True, blank=True)
     device_id = models.CharField(max_length=255)
     ip_address = models.GenericIPAddressField()
 
@@ -298,7 +307,11 @@ class ActivityCheckOut(models.Model):
     check_out_time = models.DateTimeField(auto_now_add=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    gps_accuracy = models.FloatField(null=True, blank=True)
     selfie_file_id = models.CharField(max_length=255, blank=True, null=True)
+    face_similarity = models.FloatField(null=True, blank=True)
+    face_liveness = models.FloatField(null=True, blank=True)
+    face_realness = models.FloatField(null=True, blank=True)
     device_id = models.CharField(max_length=255)
     ip_address = models.GenericIPAddressField()
 

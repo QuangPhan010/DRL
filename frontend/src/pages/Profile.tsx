@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { detectFaceFromDataUrl } from "@/lib/face-recognition";
 
 interface StudentDetail {
   id: string;
@@ -174,10 +175,34 @@ export default function Profile() {
         return;
       }
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const base64String = reader.result as string;
-        updateProfileContext({ avatar: base64String });
-        toast.success("Cập nhật ảnh đại diện thành công!");
+        const loadingToast = toast.loading("Đang kiểm tra khuôn mặt trong ảnh đại diện...");
+        try {
+          const face = await detectFaceFromDataUrl(base64String);
+          const token = localStorage.getItem("drl_token");
+          const response = await fetch(`${API_URL}/users/${user?.id}/`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+              avatar: base64String,
+              avatar_embedding: face.embedding,
+            }),
+          });
+          if (!response.ok) throw new Error("Không thể lưu ảnh đại diện lên máy chủ.");
+          updateProfileContext({ avatar: base64String });
+          toast.success("Cập nhật ảnh đại diện Face ID thành công!", { id: loadingToast });
+        } catch (error) {
+          toast.error(
+            error instanceof Error ? error.message : "Ảnh phải có đúng một khuôn mặt rõ ràng.",
+            { id: loadingToast },
+          );
+        } finally {
+          e.target.value = "";
+        }
       };
       reader.readAsDataURL(file);
     }

@@ -96,19 +96,59 @@ def _extract_text_with_pymupdf(file_bytes: bytes) -> str:
     return "\n".join(parts)
 
 
-def _extract_class_name(text: str) -> str:
+def _compact_class_code(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
+def _line_contains_expected_class(line: str, expected_code: str) -> bool:
+    spaced_code = r"[\s._/-]*".join(re.escape(char) for char in expected_code)
+    label_match = re.search(
+        r"\b(?:lop(?:\s+hoc)?|class(?:\s+name)?)\s*[:\-]?\s*(?P<value>.*)",
+        line,
+        re.IGNORECASE,
+    )
+    if label_match:
+        return bool(
+            re.match(
+                rf"^{spaced_code}(?![\s._/-]*[a-z0-9])",
+                label_match.group("value"),
+                re.IGNORECASE,
+            )
+        )
+
+    return bool(
+        re.fullmatch(
+            rf"[\s:._/-]*{spaced_code}[\s:._/-]*",
+            line,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _extract_class_name(text: str, expected_class_name: str = "") -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     normalized_lines = [(_normalize(line), line) for line in lines]
+
+    # Some PDFs position every glyph separately, producing text such as
+    # "C D 2 4 C M 1". The selected class is a safe hint: only accept it when
+    # its compact form is actually present on a single extracted line.
+    expected_code = _compact_class_code(expected_class_name)
+    if expected_code:
+        for normalized, _ in normalized_lines:
+            if _line_contains_expected_class(normalized, expected_code):
+                return expected_class_name.strip().upper()
 
     explicit_patterns = [
         re.compile(r"(?:lop|class)(?: hoc)?\s*[:\-]?\s*([A-Z0-9_./-]+)", re.IGNORECASE),
         re.compile(r"(?:lop|class)\s*(?:hoc)?\s+([A-Z0-9_./-]+)", re.IGNORECASE),
     ]
 
-    for normalized, original in normalized_lines:
+    for normalized, _ in normalized_lines:
         if "lop" in normalized or "class" in normalized:
             for pattern in explicit_patterns:
-                match = pattern.search(original)
+                # Match against the accent-free line so labels such as "Lớp"
+                # are handled by the same expression as "Lop".
+                match = pattern.search(normalized)
                 if match:
                     candidate = match.group(1).strip().upper()
                     if CLASS_CODE_PATTERN.fullmatch(candidate):
@@ -208,9 +248,14 @@ def _extract_from_lines(text: str, rows: dict[str, TranscriptRow]) -> None:
         )
 
 
-def parse_transcript_pdf(uploaded_file) -> TranscriptParseResult:
+def parse_transcript_pdf(uploaded_file, expected_class_name: str = "") -> TranscriptParseResult:
     if not uploaded_file:
         raise ValueError("No file was provided.")
+    if pdfplumber is None and fitz is None:
+        raise ValueError(
+            "Backend chưa cài thư viện đọc PDF. "
+            "Hãy chạy: python -m pip install -r requirements.txt"
+        )
 
     file_bytes = uploaded_file.read()
     uploaded_file.seek(0)
@@ -219,9 +264,12 @@ def parse_transcript_pdf(uploaded_file) -> TranscriptParseResult:
     if not text:
         text = _extract_text_with_pymupdf(file_bytes)
 
-    class_name = _extract_class_name(text)
+    class_name = _extract_class_name(text, expected_class_name=expected_class_name)
     if not class_name:
-        raise ValueError("Khong xac dinh duoc lop hoc trong PDF.")
+        raise ValueError(
+            "Không xác định được lớp học trong PDF. "
+            "Hãy dùng PDF có lớp văn bản (không phải bản scan ảnh) và có dòng 'Lớp: <mã lớp>'."
+        )
 
     rows = _extract_from_tables(tables)
     _extract_from_lines(text, rows)

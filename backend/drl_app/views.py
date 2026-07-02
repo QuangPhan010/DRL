@@ -18,6 +18,146 @@ from .serializers import (
     ExternalActivitySerializer, EvidenceFileSerializer, EvidenceReviewSerializer, FraudFlagSerializer
 )
 
+FACE_MATCH_THRESHOLD = 0.55
+FACE_PRESENTATION_THRESHOLD = 0.60
+
+
+def _face_similarity(reference, candidate):
+    """Mirror Human's normalized Euclidean face-descriptor similarity."""
+    if not isinstance(reference, list) or not isinstance(candidate, list):
+        return 0.0
+    if len(reference) < 64 or len(reference) != len(candidate):
+        return 0.0
+    try:
+        reference_values = [float(number) for number in reference]
+        candidate_values = [float(number) for number in candidate]
+        if not all(math.isfinite(number) for number in reference_values + candidate_values):
+            return 0.0
+        squared_difference = sum(
+            (left - right) ** 2
+            for left, right in zip(reference_values, candidate_values)
+        )
+        distance = round(100 * 25 * squared_difference) / 100
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    root = math.sqrt(distance)
+    similarity = (1 - (root / 100) - 0.2) / 0.6
+    return round(100 * max(min(similarity, 1), 0)) / 100
+
+
+def _verify_attendance_face(request):
+    """Compare one live scan only with the authenticated user's avatar."""
+    reference = request.user.avatar_embedding
+    if not request.user.avatar or not reference:
+        return None, Response(
+            {'error': 'Bạn cần cập nhật ảnh đại diện có khuôn mặt trước khi điểm danh.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    scan = request.data.get('faceEmbedding') or request.data.get('face_embedding')
+    try:
+        liveness = float(request.data.get('faceLiveness') or request.data.get('face_liveness') or 0)
+        realness = float(request.data.get('faceRealness') or request.data.get('face_realness') or 0)
+    except (TypeError, ValueError):
+        liveness, realness = 0, 0
+    if not math.isfinite(liveness) or not math.isfinite(realness):
+        liveness, realness = 0, 0
+
+    similarity = _face_similarity(reference, scan)
+    if liveness < FACE_PRESENTATION_THRESHOLD or realness < FACE_PRESENTATION_THRESHOLD:
+        return None, Response(
+            {'error': 'Không xác nhận được khuôn mặt thật. Hãy nhìn thẳng camera trong môi trường đủ sáng.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if similarity < FACE_MATCH_THRESHOLD:
+        return None, Response(
+            {
+                'error': 'Khuôn mặt không khớp với ảnh đại diện.',
+                'face_similarity': similarity,
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return {
+        'similarity': similarity,
+        'liveness': liveness,
+        'realness': realness,
+    }, None
+
+
+def _verify_attendance_location(request, activity, student):
+    try:
+        latitude = float(request.data.get('latitude'))
+        longitude = float(request.data.get('longitude'))
+        accuracy = float(request.data.get('accuracy'))
+    except (TypeError, ValueError, OverflowError):
+        return None, Response(
+            {'error': 'Không nhận được vị trí GPS hợp lệ sau khi quét khuôn mặt.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if (
+        not all(math.isfinite(value) for value in (latitude, longitude, accuracy))
+        or not -90 <= latitude <= 90
+        or not -180 <= longitude <= 180
+        or accuracy <= 0
+    ):
+        return None, Response(
+            {'error': 'Dữ liệu GPS không hợp lệ.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    maximum_accuracy = max(int(activity.radius_meters or 100), 100)
+    if accuracy > maximum_accuracy:
+        return None, Response(
+            {
+                'error': f'Tín hiệu GPS chưa đủ chính xác (sai số {accuracy:.0f} m). Vui lòng thử lại ngoài khu vực thoáng.',
+                'gps_accuracy': accuracy,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    activity_latitude = float(activity.latitude)
+    activity_longitude = float(activity.longitude)
+    latitude_delta = math.radians(latitude - activity_latitude)
+    longitude_delta = math.radians(longitude - activity_longitude)
+    start_latitude = math.radians(activity_latitude)
+    end_latitude = math.radians(latitude)
+    haversine_value = (
+        math.sin(latitude_delta / 2) ** 2
+        + math.sin(longitude_delta / 2) ** 2
+        * math.cos(start_latitude)
+        * math.cos(end_latitude)
+    )
+    distance = 6371000 * 2 * math.asin(math.sqrt(haversine_value))
+    allowed_radius = int(activity.radius_meters or 100)
+
+    if distance > allowed_radius:
+        FraudDetection.objects.create(
+            student=student,
+            activity=activity,
+            rule_code='GPS_OUT_OF_RANGE',
+            severity='High',
+            description=(
+                f'Face ID hợp lệ nhưng GPS cách hoạt động {distance:.1f} m '
+                f'(giới hạn {allowed_radius} m).'
+            ),
+        )
+        return None, Response(
+            {
+                'error': f'Bạn đang ở ngoài phạm vi hoạt động ({distance:.0f}/{allowed_radius} m).',
+                'distance_meters': distance,
+                'gps_accuracy': accuracy,
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    return {
+        'latitude': latitude,
+        'longitude': longitude,
+        'accuracy': accuracy,
+        'distance': distance,
+    }, None
+
 class CriteriaAdminOrReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method in permissions.SAFE_METHODS:
@@ -976,78 +1116,28 @@ class ActivityViewSet(viewsets.ModelViewSet):
             if now > end_dt:
                 return Response({'error': 'Hoạt động đã kết thúc, không thể check-in.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        lat = float(request.data.get('latitude', 0.0))
-        lon = float(request.data.get('longitude', 0.0))
-        selfie_id = request.data.get('selfieFileId') or request.data.get('selfie_file_id', '')
+        face_verification, face_error = _verify_attendance_face(request)
+        if face_error:
+            return face_error
+        location, location_error = _verify_attendance_location(request, activity, student)
+        if location_error:
+            return location_error
+
         device_id = request.data.get('deviceId') or request.data.get('device_id', 'unknown_device')
         ip_addr = request.data.get('ipAddress') or request.data.get('ip_address') or request.META.get('REMOTE_ADDR', '127.0.0.1')
 
-        # Check if they are updating a missing selfie
         existing_checkin = ActivityCheckIn.objects.filter(activity=activity, student=student).first()
-        if existing_checkin and selfie_id:
-            existing_checkin.selfie_file_id = selfie_id
-            existing_checkin.save()
-            
-            # If there was a RULE_4 fraud detection, delete it
-            RULE_4_fraud = FraudDetection.objects.filter(student=student, activity=activity, rule_code="RULE_4").first()
-            if RULE_4_fraud:
-                RULE_4_fraud.delete()
-                
-            # Write AuditLog
-            AuditLog.objects.create(
-                user=request.user,
-                action="Bổ sung ảnh selfie thành công",
-                entity_name="ActivityCheckIn",
-                entity_id=existing_checkin.id,
-                before_value="Thiếu ảnh selfie",
-                after_value=selfie_id,
-                ip_address=ip_addr
-            )
+        if existing_checkin:
             return Response({
-                'message': 'Bổ sung ảnh selfie thành công',
+                'message': 'Bạn đã check-in hoạt động này.',
+                'face_verified': True,
+                'face_similarity': face_verification['similarity'],
                 'gps_valid': True,
-                'distance_meters': 0.0,
+                'distance_meters': location['distance'],
                 'check_in': ActivityCheckInSerializer(existing_checkin).data
             })
 
-        # 1. Haversine distance validation
-        def haversine(lat1, lon1, lat2, lon2):
-            dLat = (lat2 - lat1) * math.pi / 180.0
-            dLon = (lon2 - lon1) * math.pi / 180.0
-            lat1 = lat1 * math.pi / 180.0
-            lat2 = lat2 * math.pi / 180.0
-            a = (pow(math.sin(dLat / 2), 2) +
-                 pow(math.sin(dLon / 2), 2) *
-                 math.cos(lat1) * math.cos(lat2))
-            return 6371000 * 2 * math.asin(math.sqrt(a)) # meters
-
-        act_lat = float(activity.latitude) if activity.latitude is not None else 10.850100
-        act_lon = float(activity.longitude) if activity.longitude is not None else 106.771200
-        act_radius = int(activity.radius_meters) if activity.radius_meters is not None else 100
-
-        dist = haversine(act_lat, act_lon, lat, lon)
-        is_gps_invalid = dist > act_radius
-
-        if is_gps_invalid:
-            FraudDetection.objects.create(
-                student=student,
-                activity=activity,
-                rule_code="RULE_1",
-                severity="High",
-                description=f"Check-in ngoài bán kính GPS cho phép: {dist:.1f}m (Giới hạn {act_radius}m)"
-            )
-
-        # 2. Selfie validation
-        if not selfie_id:
-            FraudDetection.objects.create(
-                student=student,
-                activity=activity,
-                rule_code="RULE_4",
-                severity="Medium",
-                description="Check-in thiếu ảnh selfie minh chứng thực tế"
-            )
-
-        # 3. Shared device within 3 minutes check
+        # Keep the shared-device anomaly rule as an additional signal.
         three_minutes_ago = timezone.now() - timezone.timedelta(minutes=3)
         shared_device_checkins = ActivityCheckIn.objects.filter(
             activity=activity,
@@ -1069,9 +1159,12 @@ class ActivityViewSet(viewsets.ModelViewSet):
         checkin_obj = ActivityCheckIn.objects.create(
             activity=activity,
             student=student,
-            latitude=lat,
-            longitude=lon,
-            selfie_file_id=selfie_id,
+            latitude=location['latitude'],
+            longitude=location['longitude'],
+            gps_accuracy=location['accuracy'],
+            face_similarity=face_verification['similarity'],
+            face_liveness=face_verification['liveness'],
+            face_realness=face_verification['realness'],
             device_id=device_id,
             ip_address=ip_addr
         )
@@ -1082,8 +1175,11 @@ class ActivityViewSet(viewsets.ModelViewSet):
 
         return Response({
             'message': 'Check-in thành công',
-            'gps_valid': not is_gps_invalid,
-            'distance_meters': dist,
+            'face_verified': True,
+            'face_similarity': face_verification['similarity'],
+            'gps_valid': True,
+            'distance_meters': location['distance'],
+            'gps_accuracy': location['accuracy'],
             'check_in': ActivityCheckInSerializer(checkin_obj).data
         })
 
@@ -1116,47 +1212,28 @@ class ActivityViewSet(viewsets.ModelViewSet):
                     'error': f'Chưa thể check-out. Bạn chỉ có thể check-out trước khi kết thúc 10 phút (Còn khoảng {remaining_mins} phút nữa).'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
-        lat = float(request.data.get('latitude', 0.0))
-        lon = float(request.data.get('longitude', 0.0))
-        selfie_id = request.data.get('selfieFileId') or request.data.get('selfie_file_id', '')
+        face_verification, face_error = _verify_attendance_face(request)
+        if face_error:
+            return face_error
+        location, location_error = _verify_attendance_location(request, activity, student)
+        if location_error:
+            return location_error
+
         device_id = request.data.get('deviceId') or request.data.get('device_id', 'unknown_device')
         ip_addr = request.data.get('ipAddress') or request.data.get('ip_address') or request.META.get('REMOTE_ADDR', '127.0.0.1')
 
-        # 1. Haversine distance validation
-        def haversine(lat1, lon1, lat2, lon2):
-            dLat = (lat2 - lat1) * math.pi / 180.0
-            dLon = (lon2 - lon1) * math.pi / 180.0
-            lat1 = lat1 * math.pi / 180.0
-            lat2 = lat2 * math.pi / 180.0
-            a = (pow(math.sin(dLat / 2), 2) +
-                 pow(math.sin(dLon / 2), 2) *
-                 math.cos(lat1) * math.cos(lat2))
-            return 6371000 * 2 * math.asin(math.sqrt(a)) # meters
-
-        act_lat = float(activity.latitude) if activity.latitude is not None else 10.850100
-        act_lon = float(activity.longitude) if activity.longitude is not None else 106.771200
-        act_radius = int(activity.radius_meters) if activity.radius_meters is not None else 100
         act_duration = int(activity.duration_minutes) if activity.duration_minutes is not None else 180
-
-        dist = haversine(act_lat, act_lon, lat, lon)
-        is_gps_invalid = dist > act_radius
-
-        if is_gps_invalid:
-            FraudDetection.objects.create(
-                student=student,
-                activity=activity,
-                rule_code="RULE_2",
-                severity="High",
-                description=f"Check-out ngoài bán kính GPS cho phép: {dist:.1f}m (Giới hạn {act_radius}m)"
-            )
 
         # Save check-out
         checkout_obj = ActivityCheckOut.objects.create(
             activity=activity,
             student=student,
-            latitude=lat,
-            longitude=lon,
-            selfie_file_id=selfie_id,
+            latitude=location['latitude'],
+            longitude=location['longitude'],
+            gps_accuracy=location['accuracy'],
+            face_similarity=face_verification['similarity'],
+            face_liveness=face_verification['liveness'],
+            face_realness=face_verification['realness'],
             device_id=device_id,
             ip_address=ip_addr
         )
@@ -1193,8 +1270,11 @@ class ActivityViewSet(viewsets.ModelViewSet):
 
         return Response({
             'message': 'Check-out thành công',
-            'gps_valid': not is_gps_invalid,
-            'distance_meters': dist,
+            'face_verified': True,
+            'face_similarity': face_verification['similarity'],
+            'gps_valid': True,
+            'distance_meters': location['distance'],
+            'gps_accuracy': location['accuracy'],
             'duration_minutes': duration_mins,
             'completion_percent': completion_pct,
             'is_completed': is_completed,
@@ -1213,6 +1293,26 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.AllowAny] # Restrict to admin in production
+
+    def update(self, request, *args, **kwargs):
+        target = self.get_object()
+        changes_face = 'avatar' in request.data or 'avatar_embedding' in request.data
+        if changes_face and (
+            not request.user.is_authenticated
+            or (request.user.pk != target.pk and request.user.role != 'admin')
+        ):
+            return Response(
+                {'error': 'Bạn không có quyền thay đổi dữ liệu Face ID của tài khoản này.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if changes_face and not (
+            request.data.get('avatar') and request.data.get('avatar_embedding')
+        ):
+            return Response(
+                {'error': 'Ảnh đại diện và dữ liệu khuôn mặt phải được cập nhật cùng nhau.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().update(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
         full_name = request.data.get('fullName') or request.data.get('full_name', '')
@@ -1345,27 +1445,6 @@ class FraudDetectionViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(activity_id=activity)
             
         return queryset
-
-    @action(detail=True, methods=['post'], url_path='request-resubmit')
-    def request_resubmit(self, request, pk=None):
-        fraud = self.get_object()
-        if fraud.rule_code != 'RULE_4':
-            return Response({'error': 'Chỉ có thể yêu cầu gửi lại đối với vi phạm thiếu ảnh selfie'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        if "Đã yêu cầu gửi lại" not in fraud.description:
-            fraud.description += " (Đã yêu cầu gửi lại minh chứng)"
-            fraud.save()
-            
-        AuditLog.objects.create(
-            user=request.user if request.user.is_authenticated else None,
-            action="Yêu cầu bổ sung ảnh selfie",
-            entity_name="FraudDetection",
-            entity_id=fraud.id,
-            before_value="Thiếu ảnh selfie",
-            after_value="Đang chờ sinh viên gửi lại",
-            ip_address=request.META.get('REMOTE_ADDR')
-        )
-        return Response({'message': 'Đã gửi yêu cầu bổ sung ảnh selfie thành công', 'description': fraud.description})
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditLog.objects.all()

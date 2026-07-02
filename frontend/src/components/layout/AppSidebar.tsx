@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Users, ClipboardList, FileCheck, Settings, GraduationCap, User as UserIcon, Sparkles,
+  LayoutDashboard, Users, FileCheck, Settings, GraduationCap, User as UserIcon, Sparkles,
   CalendarDays, ClipboardCheck, RefreshCw, ShieldAlert, Award, Clock, FileUp, ListChecks
 } from "lucide-react";
 import {
@@ -21,7 +21,6 @@ const navItems: NavItem[] = [
   { title: "Quản lý lớp học", url: "/classes", icon: GraduationCap, roles: ["admin", "advisor", "student_affairs", "academic_affairs"] },
   { title: "Rà soát lớp", url: "/class-review", icon: ClipboardCheck, roles: ["class_monitor"] },
   { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "student_affairs", "admin"] },
-  { title: "Phiếu đánh giá", url: "/evaluation-sheets", icon: ClipboardList, roles: ["advisor", "student_affairs", "admin"] },
   { title: "Tạo phiên đánh giá", url: "/evaluation-sessions/create", icon: ListChecks, roles: ["student_affairs", "admin"] },
   { title: "Đồng bộ điểm học tập", url: "/data-sync", icon: RefreshCw, roles: ["academic_affairs", "admin"] },
   { title: "Nhập bảng điểm PDF", url: "/academic-transcript-import", icon: FileUp, roles: ["academic_affairs", "admin"] },

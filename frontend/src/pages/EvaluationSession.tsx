@@ -26,7 +26,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Link } from "react-router-dom";
 
 type SchoolClass = { id: number; name: string; faculty: string; cohort: string; student_count?: number };
 type Student = { id: number; student_id: string; full_name: string; class_name: string; faculty: string; cohort: string };
@@ -51,6 +50,7 @@ type ScoreRow = Student & {
   academicClassification: string;
   attendanceCount: number;
   criterionScores: Record<number, number>;
+  rawCriterionScores: Record<number, number>;
   rawTotal: number;
   surplus: number;
   total: number;
@@ -113,6 +113,7 @@ export default function EvaluationSession() {
   const [criteria, setCriteria] = useState<Criterion[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
+  const [transcriptNotice, setTranscriptNotice] = useState("");
   const [scope, setScope] = useState("all");
   const [faculty, setFaculty] = useState("all");
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
@@ -158,6 +159,10 @@ export default function EvaluationSession() {
 
   useEffect(() => {
     if (!criteriaSetId) return;
+    // Scores are derived from the selected criteria set. Never keep rows that
+    // were calculated with a previous set or previous score limits.
+    setScores([]);
+    setSavedCount(0);
     fetch(`${API_URL}/criteria/?criteria_set=${criteriaSetId}`, { headers: headers() })
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then(setCriteria)
@@ -184,6 +189,10 @@ export default function EvaluationSession() {
     );
   }, [scores, query]);
   const selectedSet = criteriaSets.find((item) => String(item.id) === criteriaSetId);
+  const maximumSessionScore = criteria.reduce(
+    (sum, criterion) => sum + Math.max(0, criterion.max_score),
+    0,
+  ) || selectedSet?.total_max_score || 100;
   const matchedAttendance = useMemo(() => {
     const ids = new Set(scopedStudents.map((item) => item.student_id));
     return activities.reduce((total, activity) =>
@@ -201,13 +210,32 @@ export default function EvaluationSession() {
   const loadTranscriptData = async () => {
     try {
       const listRes = await fetch(`${API_URL}/transcripts/`, { headers: headers() });
-      if (!listRes.ok) throw new Error();
+      if (!listRes.ok) throw new Error(`Không tải được bảng điểm đã nhập (HTTP ${listRes.status})`);
       const list = await listRes.json();
-      const matching = list.filter((item: any) =>
-        item.school_year === year && item.semester === semester && ["IMPORTED", "VALIDATED"].includes(item.status),
+      const imported = list.filter((item: any) => item.status === "IMPORTED");
+      const matching = imported.filter((item: any) =>
+        item.school_year === year && item.semester === semester,
       );
+      if (!matching.length) {
+        const availablePeriods = Array.from(new Set(
+          imported
+            .filter((item: any) => item.school_year && item.semester)
+            .map((item: any) => `${item.semester} · ${item.school_year}`),
+        ));
+        setTranscripts([]);
+        setTranscriptNotice(
+          availablePeriods.length
+            ? `Không có bảng điểm đã import cho ${semester} · ${year}. Kỳ đang có dữ liệu: ${availablePeriods.join(", ")}.`
+            : "Chưa có bảng điểm nào hoàn tất import.",
+        );
+        return;
+      }
       const details = await Promise.all(
-        matching.map((item: any) => fetch(`${API_URL}/transcripts/${item.id}/`, { headers: headers() }).then((res) => res.json())),
+        matching.map(async (item: any) => {
+          const response = await fetch(`${API_URL}/transcripts/${item.id}/`, { headers: headers() });
+          if (!response.ok) throw new Error(`Không tải được chi tiết bảng điểm (HTTP ${response.status})`);
+          return response.json();
+        }),
       );
       const map = new Map<string, TranscriptItem>();
       details.flatMap((item: any) => item.items || item.students || []).forEach((item: any) => {
@@ -218,8 +246,11 @@ export default function EvaluationSession() {
         });
       });
       setTranscripts([...map.values()]);
-    } catch {
-      toast.error("Không kiểm tra được dữ liệu xếp loại học lực");
+      setTranscriptNotice("");
+    } catch (error) {
+      setTranscripts([]);
+      setTranscriptNotice(error instanceof Error ? error.message : "Không kiểm tra được dữ liệu xếp loại học lực");
+      toast.error(error instanceof Error ? error.message : "Không kiểm tra được dữ liệu xếp loại học lực");
     }
   };
 
@@ -264,8 +295,9 @@ export default function EvaluationSession() {
           academicClassification: record?.classification || "Chưa có dữ liệu",
           attendanceCount,
           criterionScores,
+          rawCriterionScores,
           rawTotal,
-          surplus: Math.max(0, rawTotal - (selectedSet?.total_max_score || 100)),
+          surplus: Math.max(0, rawTotal - maximumSessionScore),
           total,
           classification: classifyScore(total),
         };
@@ -280,21 +312,33 @@ export default function EvaluationSession() {
     if (step === 4 && !scores.length && scopedStudents.length) calculateScores();
   }, [step]);
 
-  const changeTotal = (studentId: string, nextTotal: number) => {
+  const changeCriterionScore = (studentId: string, criterionId: number, nextScore: number) => {
     setScores((current) => current.map((row) => {
       if (row.student_id !== studentId) return row;
-      const safeTotal = Math.max(0, Math.min(selectedSet?.total_max_score || 100, nextTotal || 0));
+      // Rows calculated before this field was introduced can still survive
+      // during Vite HMR. Fall back to the capped criterion values.
+      const rawCriterionScores = {
+        ...(row.rawCriterionScores || row.criterionScores || {}),
+      };
       const criterionScores = { ...row.criterionScores };
-      const delta = safeTotal - row.total;
-      const target = criteria[0];
-      if (target) criterionScores[target.id] = Math.max(0, Math.min(target.max_score, (criterionScores[target.id] || 0) + delta));
+      const criterion = criteria.find((item) => item.id === criterionId);
+      if (!criterion) return row;
+      rawCriterionScores[criterionId] = Math.max(
+        0,
+        Number.isFinite(nextScore) ? nextScore : 0,
+      );
+      criterionScores[criterionId] = Math.max(
+        0,
+        Math.min(criterion.max_score, rawCriterionScores[criterionId]),
+      );
       const actualTotal = Object.values(criterionScores).reduce((sum, value) => sum + value, 0);
-      const rawTotal = Math.max(actualTotal, row.rawTotal + actualTotal - row.total);
+      const rawTotal = Object.values(rawCriterionScores).reduce((sum, value) => sum + value, 0);
       return {
         ...row,
         criterionScores,
+        rawCriterionScores,
         rawTotal,
-        surplus: Math.max(0, rawTotal - (selectedSet?.total_max_score || 100)),
+        surplus: Math.max(0, rawTotal - maximumSessionScore),
         total: actualTotal,
         classification: classifyScore(actualTotal),
       };
@@ -536,6 +580,11 @@ export default function EvaluationSession() {
           <Button variant="outline" size="sm" onClick={loadTranscriptData}><RefreshCw className="mr-2 h-4 w-4" />Kiểm tra lại</Button>
         </CardHeader>
         <CardContent>
+          {transcriptNotice && (
+            <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-sm text-amber-700">
+              {transcriptNotice}
+            </div>
+          )}
           <div className="mb-5 grid gap-3 sm:grid-cols-3">
             <Stat label="Trong phạm vi" value={scopedStudents.length} />
             <Stat label="Đã có học lực" value={matchedTranscriptCount} tone="success" />
@@ -578,14 +627,64 @@ export default function EvaluationSession() {
   const renderReview = () => (
     <Card>
       <CardHeader className="gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div><CardTitle className="text-lg">Review kết quả tính điểm</CardTitle><CardDescription>Có thể điều chỉnh tổng điểm trước khi tạo phiếu nháp.</CardDescription></div>
+        <div><CardTitle className="text-lg">Review kết quả tính điểm</CardTitle><CardDescription>Điều chỉnh trực tiếp từng tiêu chí; tổng điểm và xếp loại được cập nhật tự động.</CardDescription></div>
         <div className="relative w-full sm:w-72"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm mã SV, họ tên, lớp..." /></div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="max-h-[440px] overflow-auto">
           <Table>
-            <TableHeader><TableRow><TableHead>Sinh viên</TableHead><TableHead>Lớp</TableHead><TableHead>GPA</TableHead><TableHead>Xếp loại học lực</TableHead><TableHead>Hoạt động</TableHead><TableHead>Điểm dư</TableHead><TableHead className="w-28">Điểm kỳ này</TableHead><TableHead>Xếp loại rèn luyện</TableHead></TableRow></TableHeader>
-            <TableBody>{filteredScores.map((row) => <TableRow key={row.id}><TableCell><p className="font-medium">{row.full_name}</p><p className="text-xs text-muted-foreground">{row.student_id}</p></TableCell><TableCell>{row.class_name}</TableCell><TableCell className="font-semibold">{row.gpa ?? "-"}</TableCell><TableCell><Badge variant="outline">{row.academicClassification}</Badge></TableCell><TableCell>{row.attendanceCount} lượt</TableCell><TableCell>{row.surplus > 0 ? <Badge className="bg-cyan-500/10 text-cyan-700 hover:bg-cyan-500/10">+{row.surplus}</Badge> : "-"}</TableCell><TableCell><Input type="number" className="h-8 w-20 font-bold" value={row.total} onChange={(event) => changeTotal(row.student_id, Number(event.target.value))} /></TableCell><TableCell><ClassificationBadge value={row.classification} /></TableCell></TableRow>)}</TableBody>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="sticky left-0 z-20 min-w-48 bg-background">Sinh viên</TableHead>
+                <TableHead>Lớp</TableHead>
+                <TableHead>GPA</TableHead>
+                {criteria.map((criterion) => (
+                  <TableHead key={criterion.id} className="min-w-28 text-center">
+                    <span className="block font-bold">{criterion.code}</span>
+                    <span className="text-[10px] font-normal text-muted-foreground">Tối đa {criterion.max_score}</span>
+                  </TableHead>
+                ))}
+                <TableHead className="min-w-24 text-center">Tổng điểm</TableHead>
+                <TableHead>Điểm dư</TableHead>
+                <TableHead>Xếp loại rèn luyện</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredScores.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="sticky left-0 z-10 bg-background">
+                    <p className="font-medium">{row.full_name}</p>
+                    <p className="text-xs text-muted-foreground">{row.student_id}</p>
+                  </TableCell>
+                  <TableCell>{row.class_name}</TableCell>
+                  <TableCell className="font-semibold">{row.gpa ?? "-"}</TableCell>
+                  {criteria.map((criterion) => (
+                    <TableCell key={criterion.id} className="text-center">
+                      <Input
+                        type="number"
+                        min={0}
+                        className="mx-auto h-8 w-20 text-center font-bold"
+                        value={row.rawCriterionScores?.[criterion.id] ?? row.criterionScores?.[criterion.id] ?? 0}
+                        onChange={(event) => changeCriterionScore(
+                          row.student_id,
+                          criterion.id,
+                          Number(event.target.value),
+                        )}
+                        aria-label={`${row.student_id} - tiêu chí ${criterion.code}`}
+                      />
+                      {(row.rawCriterionScores?.[criterion.id] ?? row.criterionScores?.[criterion.id] ?? 0) > criterion.max_score && (
+                        <span className="mt-1 block text-[10px] font-medium text-cyan-700">
+                          +{(row.rawCriterionScores?.[criterion.id] ?? row.criterionScores?.[criterion.id] ?? 0) - criterion.max_score} vượt trần
+                        </span>
+                      )}
+                    </TableCell>
+                  ))}
+                  <TableCell className="text-center text-base font-bold text-primary">{row.total}</TableCell>
+                  <TableCell>{row.surplus > 0 ? <Badge className="bg-cyan-500/10 text-cyan-700 hover:bg-cyan-500/10">+{row.surplus}</Badge> : "-"}</TableCell>
+                  <TableCell><ClassificationBadge value={row.classification} /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
           </Table>
         </div>
       </CardContent>
@@ -611,9 +710,6 @@ export default function EvaluationSession() {
           <div className="flex flex-col gap-3 rounded-xl border border-success/20 bg-success/10 p-4 text-success sm:flex-row sm:items-center">
             <CheckCircle2 className="h-5 w-5 shrink-0" />
             <span className="flex-1 font-medium">Phiên đã được lưu thành công.</span>
-            <Button asChild variant="outline" size="sm" className="border-success/30 bg-background text-success hover:text-success">
-              <Link to={`/evaluation-sheets?semester=${semester}&year=${encodeURIComponent(year)}`}>Xem phiếu đánh giá</Link>
-            </Button>
           </div>
         )}
         <Button className="h-12 w-full bg-gradient-primary text-base" onClick={saveSession} disabled={saving || !scores.length || savedCount === scores.length}>

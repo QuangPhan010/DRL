@@ -21,7 +21,6 @@ import AcademicTranscriptImport from "./pages/AcademicTranscriptImport";
 import Classes from "./pages/Classes";
 import Profile from "./pages/Profile";
 import EvaluationSession from "./pages/EvaluationSession";
-import EvaluationSheets from "./pages/EvaluationSheets";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,7 +31,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <AuthProvider>
-        <BrowserRouter>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<AppLayout />}>
@@ -51,7 +50,6 @@ const App = () => (
               <Route path="/data-sync" element={<DataSync />} />
               <Route path="/academic-transcript-import" element={<AcademicTranscriptImport />} />
               <Route path="/evaluation-sessions/create" element={<EvaluationSession />} />
-              <Route path="/evaluation-sheets" element={<EvaluationSheets />} />
               <Route path="/profile" element={<Profile />} />
             </Route>
 

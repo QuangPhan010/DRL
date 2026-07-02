@@ -31,10 +31,44 @@ class UserOrganizationSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     roles = serializers.ReadOnlyField()
     organizations = UserOrganizationSerializer(source='user_organizations', many=True, read_only=True)
+    avatar_embedding = serializers.JSONField(write_only=True, required=False)
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'full_name', 'role', 'roles', 'student_id', 'plain_password', 'organizations')
+        fields = (
+            'id', 'username', 'email', 'full_name', 'role', 'roles',
+            'student_id', 'plain_password', 'organizations', 'avatar',
+            'avatar_embedding',
+        )
+
+    def validate_avatar_embedding(self, value):
+        if value is None:
+            return value
+        if not isinstance(value, list) or not 64 <= len(value) <= 2048:
+            raise serializers.ValidationError('Dữ liệu khuôn mặt không hợp lệ.')
+        try:
+            embedding = [float(number) for number in value]
+        except (TypeError, ValueError, OverflowError):
+            raise serializers.ValidationError('Dữ liệu khuôn mặt không hợp lệ.')
+        if any(number != number or abs(number) == float('inf') for number in embedding):
+            raise serializers.ValidationError('Dữ liệu khuôn mặt không hợp lệ.')
+        return embedding
+
+    def validate_avatar(self, value):
+        if value and (
+            not value.startswith('data:image/')
+            or ';base64,' not in value[:100]
+            or len(value) > 3 * 1024 * 1024
+        ):
+            raise serializers.ValidationError('Ảnh đại diện không hợp lệ hoặc vượt quá 2 MB.')
+        return value
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        view = self.context.get('view')
+        if view and getattr(view, 'action', None) == 'list':
+            data.pop('avatar', None)
+        return data
 
 
 class ClassInfoSerializer(serializers.ModelSerializer):
@@ -166,11 +200,10 @@ class ActivityParticipantSerializer(serializers.ModelSerializer):
 class ActivitySerializer(serializers.ModelSerializer):
     participants = ActivityParticipantSerializer(many=True, read_only=True)
     check_in_time = serializers.SerializerMethodField()
-    selfie_resubmit_requested = serializers.SerializerMethodField()
 
     class Meta:
         model = Activity
-        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'check_in_time', 'selfie_resubmit_requested', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end')
+        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'check_in_time', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end')
 
     def get_check_in_time(self, obj):
         request = self.context.get('request')
@@ -180,16 +213,6 @@ class ActivitySerializer(serializers.ModelSerializer):
                 if checkin:
                     return timezone.localtime(checkin.check_in_time).isoformat()
         return None
-
-    def get_selfie_resubmit_requested(self, obj):
-        request = self.context.get('request')
-        if request and request.user and request.user.is_authenticated:
-            if hasattr(request.user, 'student_profile') and request.user.student_profile:
-                student = request.user.student_profile
-                fraud = obj.frauds.filter(student=student, rule_code='RULE_4').first()
-                if fraud and "Đã yêu cầu gửi lại" in fraud.description:
-                    return True
-        return False
 
 class ActivityCheckInSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.full_name', read_only=True)

@@ -67,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           studentId: u.student_id,
           isFirstLogin: u.is_first_login,
           isActive: u.is_active,
-          avatar: localStorage.getItem(`drl_avatar_${u.id}`) || "",
+          avatar: u.avatar || "",
           organizations: u.organizations || []
         }));
         setAllUsers(mapped);
@@ -104,7 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         studentId: data.user.student_id,
         isFirstLogin: data.is_first_login,
         isActive: true,
-        avatar: localStorage.getItem(`drl_avatar_${data.user.id}`) || "",
+        avatar: data.user.avatar || "",
         organizations: data.user.organizations || []
       };
 
@@ -164,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!prev) return null;
       const updated = { ...prev, ...updatedFields };
       if (updatedFields.avatar !== undefined) {
-        localStorage.setItem(`drl_avatar_${prev.id}`, updatedFields.avatar || "");
+        localStorage.removeItem(`drl_avatar_${prev.id}`);
       }
       localStorage.setItem("drl_user", JSON.stringify(updated));
       return updated;
