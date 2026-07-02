@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, Eye } from "lucide-react";
+import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -85,6 +85,7 @@ export default function Activities() {
   const [simDeviceId, setSimDeviceId] = useState("phone_device_sim");
   const [faceVerification, setFaceVerification] = useState<FaceVerificationData | null>(null);
   const [gpsPosition, setGpsPosition] = useState<GpsPosition | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const handleFaceVerified = async (data: FaceVerificationData | null) => {
     setFaceVerification(null);
@@ -530,6 +531,7 @@ export default function Activities() {
       return;
     }
     try {
+      setIsVerifying(true);
       const token = localStorage.getItem("drl_token");
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) {
@@ -553,11 +555,18 @@ export default function Activities() {
         setIsCheckInSimOpen(false);
       } else {
         console.error("Lỗi 400/500 Check-in từ backend:", responseText);
-        toast.error(`Lỗi check-in: ${responseText.substring(0, 100)}`);
+        let errorMsg = "Check-in thất bại";
+        try {
+          const parsed = JSON.parse(responseText);
+          errorMsg = parsed.error || errorMsg;
+        } catch(e) {}
+        toast.error(errorMsg);
       }
     } catch (err: any) {
       console.error("Lỗi kết nối Check-in:", err);
       toast.error("Lỗi kết nối máy chủ: " + err.message);
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -569,6 +578,7 @@ export default function Activities() {
       return;
     }
     try {
+      setIsVerifying(true);
       const token = localStorage.getItem("drl_token");
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) {
@@ -592,11 +602,18 @@ export default function Activities() {
         setIsCheckOutSimOpen(false);
       } else {
         console.error("Lỗi 400/500 Check-out từ backend:", responseText);
-        toast.error(`Lỗi check-out: ${responseText.substring(0, 100)}`);
+        let errorMsg = "Check-out thất bại";
+        try {
+          const parsed = JSON.parse(responseText);
+          errorMsg = parsed.error || errorMsg;
+        } catch(e) {}
+        toast.error(errorMsg);
       }
     } catch (err: any) {
       console.error("Lỗi kết nối Check-out:", err);
       toast.error("Lỗi kết nối máy chủ: " + err.message);
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -1186,7 +1203,13 @@ export default function Activities() {
 
       {/* Dialog: Check-In Face ID */}
       <Dialog open={isCheckInSimOpen} onOpenChange={setIsCheckInSimOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          {isVerifying && (
+            <div className="absolute inset-0 bg-background/80 z-50 flex flex-col items-center justify-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm font-semibold">Đang đối sánh Face ID & GPS...</p>
+            </div>
+          )}
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               Điểm danh hoạt động bằng Face ID
@@ -1208,7 +1231,13 @@ export default function Activities() {
 
       {/* Dialog: Check-Out Face ID */}
       <Dialog open={isCheckOutSimOpen} onOpenChange={setIsCheckOutSimOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          {isVerifying && (
+            <div className="absolute inset-0 bg-background/80 z-50 flex flex-col items-center justify-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm font-semibold">Đang đối sánh Face ID & GPS...</p>
+            </div>
+          )}
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               Điểm danh kết thúc bằng Face ID

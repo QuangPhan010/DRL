@@ -91,6 +91,54 @@ class StudentSerializer(serializers.ModelSerializer):
         model = Student
         fields = ('id', 'student_id', 'full_name', 'email', 'class_info', 'class_name', 'faculty', 'cohort', 'gender', 'phone', 'password', 'positions')
 
+    def create(self, validated_data):
+        student_id = validated_data.get('student_id')
+        email = validated_data.get('email')
+        full_name = validated_data.get('full_name')
+
+        import string
+        import random
+        
+        username = student_id.lower() if student_id else ""
+        user_obj = None
+        if username:
+            user_obj = User.objects.filter(username__iexact=username).first()
+            if not user_obj and student_id:
+                user_obj = User.objects.filter(student_id=student_id).first()
+                
+        if not user_obj and username:
+            characters = string.ascii_letters + string.digits
+            random_password = ''.join(random.choice(characters) for i in range(8))
+            
+            user_obj = User.objects.create_user(
+                username=username,
+                email=email,
+                password=random_password,
+                role='student',
+                full_name=full_name,
+                student_id=student_id,
+                is_first_login=True,
+                plain_password=random_password
+            )
+        
+        validated_data['user'] = user_obj
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        user = instance.user
+        if user:
+            student_id = validated_data.get('student_id', instance.student_id)
+            email = validated_data.get('email', instance.email)
+            full_name = validated_data.get('full_name', instance.full_name)
+            
+            user.username = student_id.lower()
+            user.student_id = student_id
+            user.email = email
+            user.full_name = full_name
+            user.save()
+            
+        return super().update(instance, validated_data)
+
 class SubItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubItem

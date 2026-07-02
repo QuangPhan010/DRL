@@ -1,18 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, CheckCircle2, Loader2, ScanFace, ShieldAlert } from "lucide-react";
+import { Camera, Loader2, ScanFace, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  compareFaces,
-  detectFaceFromDataUrl,
-  detectFaceFromVideo,
-  loadFaceModels,
-} from "@/lib/face-recognition";
 
 export interface FaceVerificationData {
-  faceEmbedding: number[];
-  faceLiveness: number;
-  faceRealness: number;
-  faceSimilarity: number;
+  faceImage: string;
 }
 
 interface Props {
@@ -20,16 +11,13 @@ interface Props {
   onVerified: (data: FaceVerificationData | null) => void | Promise<void>;
 }
 
-const MATCH_THRESHOLD = 0.55;
-const PRESENTATION_THRESHOLD = 0.6;
-
 export default function FaceVerificationCamera({ avatar, onVerified }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [verifiedSimilarity, setVerifiedSimilarity] = useState<number | null>(null);
-  const [message, setMessage] = useState("Mở camera để bắt đầu quét khuôn mặt.");
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [message, setMessage] = useState("Mở camera để bắt đầu chụp khuôn mặt.");
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -40,7 +28,7 @@ export default function FaceVerificationCamera({ avatar, onVerified }: Props) {
 
   useEffect(() => {
     onVerified(null);
-    setVerifiedSimilarity(null);
+    setCapturedImage(null);
     return stopCamera;
   }, [avatar]);
 
@@ -51,8 +39,7 @@ export default function FaceVerificationCamera({ avatar, onVerified }: Props) {
     }
     try {
       setBusy(true);
-      setMessage("Đang tải bộ nhận diện khuôn mặt...");
-      await loadFaceModels();
+      setMessage("Đang khởi động camera...");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 720 } },
@@ -63,7 +50,8 @@ export default function FaceVerificationCamera({ avatar, onVerified }: Props) {
         await videoRef.current.play();
       }
       setCameraActive(true);
-      setMessage("Đưa khuôn mặt vào giữa khung, nhìn thẳng và giữ đủ sáng.");
+      setCapturedImage(null);
+      setMessage("Đưa khuôn mặt của bạn đối diện camera và giữ đủ sáng.");
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -75,40 +63,31 @@ export default function FaceVerificationCamera({ avatar, onVerified }: Props) {
     }
   };
 
-  const verify = async () => {
+  const captureImage = async () => {
     if (!videoRef.current || !avatar) return;
     try {
       setBusy(true);
       onVerified(null);
-      setVerifiedSimilarity(null);
-      setMessage("Đang kiểm tra khuôn mặt và tự động xác định vị trí...");
-      const [reference, scanned] = await Promise.all([
-        detectFaceFromDataUrl(avatar),
-        detectFaceFromVideo(videoRef.current),
-      ]);
-      const similarity = compareFaces(reference.embedding, scanned.embedding);
+      setMessage("Đang chụp ảnh...");
 
-      if (
-        scanned.liveness < PRESENTATION_THRESHOLD ||
-        scanned.realness < PRESENTATION_THRESHOLD
-      ) {
-        throw new Error("Không xác nhận được khuôn mặt thật. Không dùng ảnh chụp hoặc màn hình khác.");
-      }
-      if (similarity < MATCH_THRESHOLD) {
-        throw new Error(`Khuôn mặt không khớp ảnh đại diện (${Math.round(similarity * 100)}%).`);
-      }
+      const video = videoRef.current;
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Không thể khởi tạo canvas.");
+      
+      // Draw video frame
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const faceImage = canvas.toDataURL("image/jpeg", 0.9);
 
-      await onVerified({
-        faceEmbedding: scanned.embedding,
-        faceLiveness: scanned.liveness,
-        faceRealness: scanned.realness,
-        faceSimilarity: similarity,
-      });
-      setVerifiedSimilarity(similarity);
-      setMessage(`Face ID và GPS hợp lệ — độ tương đồng ${Math.round(similarity * 100)}%.`);
+      await onVerified({ faceImage });
+      setCapturedImage(faceImage);
+      setMessage("Đã chụp ảnh khuôn mặt thành công. Vui lòng nhấn nút điểm danh phía dưới.");
       stopCamera();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Không thể xác thực khuôn mặt.");
+      setMessage(error instanceof Error ? error.message : "Không thể chụp ảnh.");
     } finally {
       setBusy(false);
     }
@@ -124,44 +103,39 @@ export default function FaceVerificationCamera({ avatar, onVerified }: Props) {
           className={`h-full w-full object-cover scale-x-[-1] ${cameraActive ? "block" : "hidden"}`}
         />
         {!cameraActive && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-muted text-muted-foreground">
-            {verifiedSimilarity !== null ? (
-              <CheckCircle2 className="h-14 w-14 text-green-600" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-muted text-muted-foreground">
+            {capturedImage ? (
+              <img src={capturedImage} alt="Captured preview" className="h-full w-full object-cover scale-x-[-1]" />
             ) : (
-              <ScanFace className="h-14 w-14" />
+              <div className="flex flex-col items-center justify-center gap-3">
+                <ScanFace className="h-14 w-14" />
+                <span className="px-6 text-center text-sm">{message}</span>
+              </div>
             )}
-            <span className="px-6 text-center text-sm">{message}</span>
           </div>
-        )}
-        {cameraActive && (
-          <div className="pointer-events-none absolute inset-[12%] rounded-[45%] border-2 border-white/80 shadow-[0_0_0_999px_rgba(0,0,0,.25)]" />
         )}
       </div>
 
       {cameraActive ? (
-        <Button type="button" className="w-full gap-2" onClick={verify} disabled={busy}>
+        <Button type="button" className="w-full gap-2 bg-gradient-primary" onClick={captureImage} disabled={busy}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanFace className="h-4 w-4" />}
-          Quét và xác thực
+          Chụp ảnh xác thực
         </Button>
       ) : (
         <Button
           type="button"
-          variant={verifiedSimilarity === null ? "default" : "outline"}
+          variant={!capturedImage ? "default" : "outline"}
           className="w-full gap-2"
           onClick={startCamera}
           disabled={busy || !avatar}
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-          {verifiedSimilarity === null ? "Mở camera Face ID" : "Quét lại"}
+          {!capturedImage ? "Mở camera Face ID" : "Chụp lại"}
         </Button>
       )}
 
-      <p className={`flex gap-2 text-xs ${verifiedSimilarity !== null ? "text-green-700" : "text-muted-foreground"}`}>
-        {verifiedSimilarity !== null ? (
-          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        ) : (
-          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        )}
+      <p className={`flex gap-2 text-xs ${capturedImage ? "text-green-700 font-semibold" : "text-muted-foreground"}`}>
+        {!capturedImage && <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
         {message}
       </p>
     </div>

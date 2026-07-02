@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { CalendarDays, ArrowLeft, Award, Users, CheckCircle2, Clock, MapPin, Building, ShieldAlert, FileText, QrCode, Trash2, Eye, Shield, Check, AlertTriangle } from "lucide-react";
+import { CalendarDays, ArrowLeft, Award, Users, CheckCircle2, Clock, MapPin, Building, ShieldAlert, FileText, QrCode, Trash2, Eye, Shield, Check, AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -40,6 +40,7 @@ export default function ActivityDetail() {
   const [simDeviceId, setSimDeviceId] = useState("device_" + (user?.studentId || "SV001"));
   const [faceVerification, setFaceVerification] = useState<FaceVerificationData | null>(null);
   const [gpsPosition, setGpsPosition] = useState<GpsPosition | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const handleFaceVerified = async (data: FaceVerificationData | null) => {
     setFaceVerification(null);
@@ -125,6 +126,7 @@ export default function ActivityDetail() {
       return;
     }
     try {
+      setIsVerifying(true);
       const token = localStorage.getItem("drl_token");
       const res = await fetch(`${API_URL}/activities/${id}/check-in/`, {
         method: "POST",
@@ -148,6 +150,8 @@ export default function ActivityDetail() {
       }
     } catch (err) {
       toast.error("Lỗi kết nối");
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -158,6 +162,7 @@ export default function ActivityDetail() {
       return;
     }
     try {
+      setIsVerifying(true);
       const token = localStorage.getItem("drl_token");
       const res = await fetch(`${API_URL}/activities/${id}/check-out/`, {
         method: "POST",
@@ -181,6 +186,8 @@ export default function ActivityDetail() {
       }
     } catch (err) {
       toast.error("Lỗi kết nối");
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -749,7 +756,13 @@ export default function ActivityDetail() {
 
       {/* Dialog: Check-in Face ID */}
       <Dialog open={isCheckInSimOpen} onOpenChange={setIsCheckInSimOpen}>
-        <DialogContent className="sm:max-w-[440px]">
+        <DialogContent className="sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
+          {isVerifying && (
+            <div className="absolute inset-0 bg-background/80 z-50 flex flex-col items-center justify-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm font-semibold">Đang đối sánh Face ID & GPS...</p>
+            </div>
+          )}
           <DialogHeader>
             <DialogTitle className="font-display text-base font-bold">Check-in bằng Face ID</DialogTitle>
             <DialogDescription className="text-xs">
@@ -769,7 +782,13 @@ export default function ActivityDetail() {
 
       {/* Dialog: Check-out Face ID */}
       <Dialog open={isCheckOutSimOpen} onOpenChange={setIsCheckOutSimOpen}>
-        <DialogContent className="sm:max-w-[440px]">
+        <DialogContent className="sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
+          {isVerifying && (
+            <div className="absolute inset-0 bg-background/80 z-50 flex flex-col items-center justify-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm font-semibold">Đang đối sánh Face ID & GPS...</p>
+            </div>
+          )}
           <DialogHeader>
             <DialogTitle className="font-display text-base font-bold">Check-out bằng Face ID</DialogTitle>
             <DialogDescription className="text-xs">

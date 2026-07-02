@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { Plus, Search, Edit, Trash2, Filter, Download, Users as UsersIcon, Loader2 } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Filter, Download, Users as UsersIcon, Loader2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,7 +45,12 @@ export default function Students() {
   const [form, setForm] = useState<Omit<Student, "id">>(empty);
 
   const [currentPage, setCurrentPage] = useState(1);
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const ITEMS_PER_PAGE = 20;
+
+  const togglePasswordVisibility = (id: string) => {
+    setVisiblePasswords(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   useEffect(() => {
     setCurrentPage(1);
@@ -114,7 +119,8 @@ export default function Students() {
           faculty: s.faculty,
           cohort: s.cohort,
           gender: s.gender,
-          phone: s.phone
+          phone: s.phone,
+          password: s.password
         }));
         setStudents(mapped);
       }
@@ -452,6 +458,7 @@ export default function Students() {
                   <TableHead className="hidden lg:table-cell">Khoa</TableHead>
                   <TableHead className="hidden md:table-cell">Giới tính</TableHead>
                   <TableHead className="hidden lg:table-cell">Email</TableHead>
+                  {!isMonitor && <TableHead className="hidden lg:table-cell">Mật khẩu</TableHead>}
                   {!isMonitor && <TableHead className="text-right">Thao tác</TableHead>}
                 </TableRow>
               </TableHeader>
@@ -476,6 +483,27 @@ export default function Students() {
                       <TableCell className="hidden lg:table-cell text-muted-foreground">{s.faculty}</TableCell>
                       <TableCell className="hidden md:table-cell">{s.gender}</TableCell>
                       <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">{s.email}</TableCell>
+                      {!isMonitor && (
+                        <TableCell className="hidden lg:table-cell font-mono text-sm">
+                          {s.password ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="min-w-[70px] inline-block">
+                                {visiblePasswords[s.id] ? s.password : "••••••••"}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                onClick={() => togglePasswordVisibility(s.id)}
+                              >
+                                {visiblePasswords[s.id] ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground text-xs italic">Đã đổi mật khẩu</span>
+                          )}
+                        </TableCell>
+                      )}
                       {!isMonitor && (
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
@@ -502,7 +530,7 @@ export default function Students() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <TableRow><TableCell colSpan={isMonitor ? 6 : 7} className="text-center py-12 text-muted-foreground">Không tìm thấy sinh viên nào</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={isMonitor ? 6 : 8} className="text-center py-12 text-muted-foreground">Không tìm thấy sinh viên nào</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -563,6 +591,28 @@ export default function Students() {
                     <span className="text-muted-foreground block">Email:</span>
                     <span className="font-medium text-primary truncate block" title={s.email}>{s.email}</span>
                   </div>
+                  {!isMonitor && (
+                    <div className="col-span-2 pt-1 border-t">
+                      <span className="text-muted-foreground block mb-0.5">Mật khẩu:</span>
+                      {s.password ? (
+                        <div className="flex items-center gap-1.5 font-mono text-sm">
+                          <span className="min-w-[70px] inline-block font-medium">
+                            {visiblePasswords[s.id] ? s.password : "••••••••"}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                            onClick={() => togglePasswordVisibility(s.id)}
+                          >
+                            {visiblePasswords[s.id] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-xs italic">Đã đổi mật khẩu</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
