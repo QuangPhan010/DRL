@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { FileCheck, CheckCircle2, XCircle, Eye, Clock, Lock, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,10 +12,12 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { classificationColor } from "@/lib/mock-data";
+import { normalizeSearch } from "@/lib/search";
 import { toast } from "sonner";
 
 export default function Approvals() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [evals, setEvals] = useState<any[]>([]);
   const [criteria, setCriteria] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,13 +63,21 @@ export default function Approvals() {
     fetchEvalsAndCriteria();
   }, [user]);
 
-  const pending = evals.filter(e => {
+  const globalSearch = normalizeSearch(searchParams.get("search") || "");
+  const visibleEvals = evals.filter(e => !globalSearch || normalizeSearch([
+    e.student_id,
+    e.student_name,
+    e.class_name,
+    e.semester,
+    e.year,
+  ].join(" ")).includes(globalSearch));
+  const pending = visibleEvals.filter(e => {
     if (isAdvisor) return e.status === "advisor_pending";
     if (isAffairs) return e.status === "pending";
     return e.status === "pending" || e.status === "advisor_pending";
   });
-  const approved = evals.filter(e => e.status === "approved");
-  const rejected = evals.filter(e => e.status === "rejected");
+  const approved = visibleEvals.filter(e => e.status === "approved");
+  const rejected = visibleEvals.filter(e => e.status === "rejected");
 
   const decide = async (id: number, statusParam: "approved" | "rejected" | "pending") => {
     try {

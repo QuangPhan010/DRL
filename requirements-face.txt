@@ -1,0 +1,8 @@
+# Optional Face ID dependencies.
+# Use Python 3.10-3.13, then install the base requirements first:
+#   python -m pip install -r requirements.txt
+#   python -m pip install -r requirements-face.txt
+deepface>=0.0.93
+opencv-python>=4.10
+tensorflow>=2.16.0
+tf-keras>=2.16.0

@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { normalizeSearch } from "@/lib/search";
 
 type SchoolClass = { id: number; name: string; faculty: string; cohort: string; student_count?: number };
 type Student = { id: number; student_id: string; full_name: string; class_name: string; faculty: string; cohort: string };
@@ -107,6 +108,7 @@ export default function EvaluationSession() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [calculating, setCalculating] = useState(false);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [criteriaSets, setCriteriaSets] = useState<CriteriaSet[]>([]);
@@ -128,22 +130,40 @@ export default function EvaluationSession() {
     const loadBaseData = async () => {
       try {
         setLoading(true);
-        const [classRes, studentRes, setRes, activityRes] = await Promise.all([
+        const [classRes, studentRes, setRes, activityRes, transcriptRes] = await Promise.all([
           fetch(`${API_URL}/classes/`, { headers: headers() }),
           fetch(`${API_URL}/students/`, { headers: headers() }),
           fetch(`${API_URL}/criteria-sets/`, { headers: headers() }),
           fetch(`${API_URL}/activities/`, { headers: headers() }),
+          fetch(`${API_URL}/transcripts/`, { headers: headers() }),
         ]);
         if (!classRes.ok || !studentRes.ok || !setRes.ok) throw new Error("Không thể tải dữ liệu nền");
         const [classData, studentData, setData] = await Promise.all([classRes.json(), studentRes.json(), setRes.json()]);
         const activityData = activityRes.ok ? await activityRes.json() : [];
+        const transcriptData = transcriptRes.ok ? await transcriptRes.json() : [];
         setClasses(classData);
         setStudents(studentData);
         setCriteriaSets(setData);
         setActivities(activityData);
-        const preferred = setData.find((item: CriteriaSet) => item.is_active) || setData[0];
+        const latestImportedPeriod = (transcriptData || []).find(
+          (item: any) => item.status === "IMPORTED" && item.school_year && item.semester,
+        );
+        const matchingSet = latestImportedPeriod
+          ? setData.find((item: CriteriaSet) =>
+              item.semester === latestImportedPeriod.semester
+              && item.academic_year === latestImportedPeriod.school_year
+            )
+          : null;
+        const preferred = matchingSet
+          || setData.find((item: CriteriaSet) => item.is_active)
+          || setData[0];
         if (preferred) {
           setCriteriaSetId(String(preferred.id));
+        }
+        if (latestImportedPeriod) {
+          setSemester(latestImportedPeriod.semester);
+          setYear(latestImportedPeriod.school_year);
+        } else if (preferred) {
           if (preferred.semester) setSemester(preferred.semester);
           if (preferred.academic_year) setYear(preferred.academic_year);
         }
@@ -169,6 +189,11 @@ export default function EvaluationSession() {
       .catch(() => toast.error("Không tải được cấu trúc bộ tiêu chí"));
   }, [criteriaSetId]);
 
+  useEffect(() => {
+    setScores([]);
+    setSavedCount(0);
+  }, [semester, year]);
+
   const faculties = useMemo(() => Array.from(new Set(classes.map((item) => item.faculty).filter(Boolean))).sort(), [classes]);
   const visibleClasses = useMemo(
     () => classes.filter((item) => faculty === "all" || item.faculty === faculty),
@@ -189,6 +214,10 @@ export default function EvaluationSession() {
     );
   }, [scores, query]);
   const selectedSet = criteriaSets.find((item) => String(item.id) === criteriaSetId);
+  const criteriaSetPeriodMismatch = !!selectedSet && (
+    (selectedSet.semester && selectedSet.semester !== semester)
+    || (selectedSet.academic_year && selectedSet.academic_year !== year)
+  );
   const maximumSessionScore = criteria.reduce(
     (sum, criterion) => sum + Math.max(0, criterion.max_score),
     0,
@@ -202,6 +231,9 @@ export default function EvaluationSession() {
     const transcriptIds = new Set(transcripts.map((item) => item.student_code));
     return scopedStudents.filter((item) => transcriptIds.has(item.student_id)).length;
   }, [scopedStudents, transcripts]);
+  const averageCalculatedScore = scores.length
+    ? Math.round(scores.reduce((sum, item) => sum + item.total, 0) / scores.length)
+    : 0;
 
   const toggleClass = (className: string, checked: boolean) => {
     setSelectedClasses((current) => checked ? [...new Set([...current, className])] : current.filter((item) => item !== className));
@@ -209,6 +241,7 @@ export default function EvaluationSession() {
 
   const loadTranscriptData = async () => {
     try {
+      setTranscriptLoading(true);
       const listRes = await fetch(`${API_URL}/transcripts/`, { headers: headers() });
       if (!listRes.ok) throw new Error(`Không tải được bảng điểm đã nhập (HTTP ${listRes.status})`);
       const list = await listRes.json();
@@ -251,6 +284,8 @@ export default function EvaluationSession() {
       setTranscripts([]);
       setTranscriptNotice(error instanceof Error ? error.message : "Không kiểm tra được dữ liệu xếp loại học lực");
       toast.error(error instanceof Error ? error.message : "Không kiểm tra được dữ liệu xếp loại học lực");
+    } finally {
+      setTranscriptLoading(false);
     }
   };
 
@@ -262,6 +297,10 @@ export default function EvaluationSession() {
     setCalculating(true);
     window.setTimeout(() => {
       const transcriptMap = new Map(transcripts.map((item) => [item.student_code, item]));
+      const academicCriterion = criteria.find((criterion) => {
+        const name = normalizeSearch(criterion.name);
+        return name.includes("hoc luc") || name.includes("hoc tap") || name.includes("academic");
+      }) || criteria[0];
       const rows = scopedStudents.map<ScoreRow>((student) => {
         const criterionScores: Record<number, number> = {};
         const rawCriterionScores: Record<number, number> = {};
@@ -270,7 +309,9 @@ export default function EvaluationSession() {
           rawCriterionScores[criterion.id] = 0;
         });
         const record = transcriptMap.get(student.student_id);
-        if (criteria[0]) rawCriterionScores[criteria[0].id] = academicPoints(record?.gpa ?? null);
+        if (academicCriterion) {
+          rawCriterionScores[academicCriterion.id] = academicPoints(record?.gpa ?? null);
+        }
         let attendanceCount = 0;
         activities.forEach((activity) => {
           const attended = (activity.participants || []).some(
@@ -309,8 +350,15 @@ export default function EvaluationSession() {
   };
 
   useEffect(() => {
-    if (step === 4 && !scores.length && scopedStudents.length) calculateScores();
-  }, [step]);
+    if (
+      step === 4
+      && !transcriptLoading
+      && !scores.length
+      && scopedStudents.length
+    ) {
+      calculateScores();
+    }
+  }, [step, transcriptLoading]);
 
   const changeCriterionScore = (studentId: string, criterionId: number, nextScore: number) => {
     setScores((current) => current.map((row) => {
@@ -359,6 +407,10 @@ export default function EvaluationSession() {
 
   const goNext = () => {
     if (!validateStep()) return;
+    if (step === 3 && transcriptLoading) {
+      toast.info("Đang tải dữ liệu học lực, vui lòng đợi trong giây lát.");
+      return;
+    }
     setStep((current) => Math.min(steps.length - 1, current + 1));
   };
 
@@ -532,6 +584,12 @@ export default function EvaluationSession() {
               {selectedSet.is_active && <Badge className="bg-success/15 text-success hover:bg-success/15"><Check className="mr-1 h-3 w-3" />Đang áp dụng</Badge>}
             </div>
           )}
+          {criteriaSetPeriodMismatch && (
+            <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-sm text-amber-700">
+              Bộ tiêu chí đang chọn dành cho {selectedSet?.semester} · {selectedSet?.academic_year},
+              khác kỳ đánh giá {semester} · {year}. Điểm vẫn được tính theo bộ này; hãy kiểm tra lại trước khi lưu.
+            </div>
+          )}
         </CardContent>
       </Card>
       <Card>
@@ -577,7 +635,10 @@ export default function EvaluationSession() {
       <Card>
         <CardHeader className="flex-row items-start justify-between">
           <div><CardTitle className="text-lg">Dữ liệu xếp loại học lực</CardTitle><CardDescription>Đối chiếu bảng điểm đã nhập cho {semester} · {year}.</CardDescription></div>
-          <Button variant="outline" size="sm" onClick={loadTranscriptData}><RefreshCw className="mr-2 h-4 w-4" />Kiểm tra lại</Button>
+          <Button variant="outline" size="sm" onClick={loadTranscriptData} disabled={transcriptLoading}>
+            <RefreshCw className={cn("mr-2 h-4 w-4", transcriptLoading && "animate-spin")} />
+            {transcriptLoading ? "Đang tải..." : "Kiểm tra lại"}
+          </Button>
         </CardHeader>
         <CardContent>
           {transcriptNotice && (
@@ -615,11 +676,12 @@ export default function EvaluationSession() {
           {scores.length ? "Tính lại điểm" : "Bắt đầu tính điểm"}
         </Button>
       </div>
-      <CardContent className="grid gap-4 p-6 sm:grid-cols-4">
+      <CardContent className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="Sinh viên" value={scores.length || scopedStudents.length} />
         <Stat label="Có điểm học lực" value={scores.filter((item) => item.gpa !== null).length} tone="success" />
         <Stat label="Có điểm hoạt động" value={scores.filter((item) => item.attendanceCount > 0).length} tone="success" />
         <Stat label="Cần review" value={scores.filter((item) => item.gpa === null).length} tone="warning" />
+        <Stat label="Điểm trung bình" value={averageCalculatedScore} tone="primary" />
       </CardContent>
     </Card>
   );
@@ -760,7 +822,15 @@ export default function EvaluationSession() {
 
       <div className="flex justify-between border-t pt-5">
         <Button variant="outline" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0 || saving}><ArrowLeft className="mr-2 h-4 w-4" />Quay lại</Button>
-        {step < steps.length - 1 && <Button onClick={goNext} disabled={step === 4 && calculating}>Tiếp tục<ArrowRight className="ml-2 h-4 w-4" /></Button>}
+        {step < steps.length - 1 && (
+          <Button
+            onClick={goNext}
+            disabled={(step === 4 && calculating) || (step === 3 && transcriptLoading)}
+          >
+            {step === 3 && transcriptLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Tiếp tục<ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   );

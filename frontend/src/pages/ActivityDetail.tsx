@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { CalendarDays, ArrowLeft, Award, Users, CheckCircle2, Clock, MapPin, Building, ShieldAlert, FileText, QrCode, Trash2, Eye, Shield, Check, AlertTriangle, Loader2 } from "lucide-react";
+import { CalendarDays, ArrowLeft, Award, Users, CheckCircle2, Clock, MapPin, Building, ShieldAlert, FileText, QrCode, Trash2, Eye, Shield, Check, AlertTriangle, Loader2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -78,6 +78,7 @@ export default function ActivityDetail() {
   const [faceVerification, setFaceVerification] = useState<FaceVerificationData | null>(null);
   const [gpsPosition, setGpsPosition] = useState<GpsPosition | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isExportingParticipants, setIsExportingParticipants] = useState(false);
 
   const handleFaceVerified = async (data: FaceVerificationData | null) => {
     setFaceVerification(null);
@@ -149,10 +150,72 @@ export default function ActivityDetail() {
         toast.success("Đăng ký tham gia hoạt động thành công!");
         fetchDetail();
       } else {
-        toast.error("Không thể đăng ký tham gia");
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error || "Không thể đăng ký tham gia");
       }
     } catch (err) {
       toast.error("Lỗi kết nối");
+    }
+  };
+
+  const cancelRegistration = async () => {
+    const token = localStorage.getItem("drl_token");
+    if (!token) {
+      toast.error("Vui lòng đăng nhập để hủy đăng ký.");
+      return;
+    }
+    if (!window.confirm("Bạn có chắc muốn hủy đăng ký hoạt động này?")) return;
+
+    try {
+      const response = await fetch(`${API_URL}/activities/${id}/cancel-registration/`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || "Không thể hủy đăng ký hoạt động.");
+      }
+      toast.success(data?.message || "Đã hủy đăng ký hoạt động.");
+      fetchDetail();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không thể hủy đăng ký hoạt động.");
+    }
+  };
+
+  const exportParticipants = async () => {
+    const token = localStorage.getItem("drl_token");
+    if (!token) {
+      toast.error("Vui lòng đăng nhập để xuất danh sách.");
+      return;
+    }
+
+    try {
+      setIsExportingParticipants(true);
+      const response = await fetch(`${API_URL}/activities/${id}/export-participants/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || "Không thể xuất danh sách sinh viên.");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+        || `activity_${id}_participants.xlsx`;
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(downloadUrl);
+      toast.success("Đã xuất danh sách sinh viên tham gia.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không thể xuất danh sách sinh viên.");
+    } finally {
+      setIsExportingParticipants(false);
     }
   };
 
@@ -345,6 +408,8 @@ export default function ActivityDetail() {
   // Internal helper variables
   const isRegistered = !isExternal && activity?.participants?.some((p: any) => p.student_id === user?.studentId || p.studentId === user?.studentId);
   const studentStatus = !isExternal && activity?.participants?.find((p: any) => p.student_id === user?.studentId || p.studentId === user?.studentId)?.status;
+  const isActivityFull = !isExternal
+    && activity?.participants?.length >= (activity?.max_participants || 100);
 
   const parseDateTime = (dateStr?: string, timeStr?: string) => {
     if (!dateStr || !timeStr) return null;
@@ -359,6 +424,11 @@ export default function ActivityDetail() {
       timeParts[2] ? Number(timeParts[2]) : 0
     );
   };
+  const cancellationDeadline = !isExternal
+    ? parseDateTime(activity?.date, activity?.start_time || "00:00")
+    : null;
+  const canCancelRegistration = !!cancellationDeadline
+    && cancellationDeadline.getTime() - Date.now() >= 24 * 60 * 60 * 1000;
 
   const getCheckInStatus = (act: any) => {
     if (act?.check_in_time) {
@@ -385,15 +455,23 @@ export default function ActivityDetail() {
     if (!act?.check_in_time) {
       return { enabled: false, text: "Chưa Check-in" };
     }
-    const end = parseDateTime(act?.date, act?.end_time);
-    if (!end) return { enabled: true, text: "Check-out Face ID" };
+    const start = parseDateTime(act?.date, act?.start_time || "00:00");
+    if (!start) return { enabled: true, text: "Check-out Face ID" };
+    let end = parseDateTime(act?.date, act?.end_time || "");
+    if (!end) {
+      end = new Date(start.getTime() + (act?.duration_minutes || 180) * 60 * 1000);
+    } else if (end <= start) {
+      end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+    }
 
     const now = new Date();
-    const checkoutOpenTime = new Date(end.getTime() - 10 * 60 * 1000);
+    const checkoutOpenTime = new Date(
+      start.getTime() + (end.getTime() - start.getTime()) * 2 / 3,
+    );
 
     if (now < checkoutOpenTime) {
-      const diffMins = Math.max(1, Math.round((checkoutOpenTime.getTime() - now.getTime()) / (60 * 1000)));
-      return { enabled: false, text: `Khóa (còn ${diffMins}p)` };
+      const diffMins = Math.max(1, Math.ceil((checkoutOpenTime.getTime() - now.getTime()) / (60 * 1000)));
+      return { enabled: false, text: `Mở sau ${diffMins}p` };
     }
     return { enabled: true, text: "Check-out Face ID" };
   };
@@ -460,6 +538,15 @@ export default function ActivityDetail() {
                     <div className="flex gap-2.5 items-start">
                       <Users className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                       <div>
+                        <span className="text-xs text-muted-foreground block">Số lượng tham gia</span>
+                        <span className="font-semibold">
+                          {activity.participants?.length || 0}/{activity.max_participants || 100} sinh viên
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2.5 items-start">
+                      <Users className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                      <div>
                         <span className="text-xs text-muted-foreground block">Phạm vi đối tượng</span>
                         <span className="font-semibold">
                           {activity.scope_type === "class" ? "Giới hạn Lớp học" : activity.scope_type === "club" ? "Giới hạn CLB" : "Toàn trường"}
@@ -492,6 +579,18 @@ export default function ActivityDetail() {
                     <h3 className="font-display font-bold flex items-center gap-2">
                       <Users className="h-5 w-5 text-primary" /> Sinh viên đăng ký tham gia ({activity.participants?.length || 0})
                     </h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={exportParticipants}
+                      disabled={isExportingParticipants}
+                    >
+                      {isExportingParticipants
+                        ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        : <Download className="h-4 w-4 mr-2" />}
+                      Xuất Excel
+                    </Button>
                   </div>
 
                   <Table className="min-w-[700px]">
@@ -631,7 +730,31 @@ export default function ActivityDetail() {
                   {isStudent && activity.status === "upcoming" && (
                     <>
                       {activity.is_registration_required && !isRegistered && (
-                        <Button className="w-full bg-gradient-primary" onClick={registerActivity}>Đăng ký tham gia</Button>
+                        <Button
+                          className="w-full bg-gradient-primary"
+                          onClick={registerActivity}
+                          disabled={isActivityFull}
+                        >
+                          {isActivityFull ? "Hoạt động đã đủ người" : "Đăng ký tham gia"}
+                        </Button>
+                      )}
+                      {activity.is_registration_required && studentStatus === "registered" && (
+                        <Button
+                          className="w-full border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          variant="outline"
+                          onClick={cancelRegistration}
+                          disabled={!canCancelRegistration}
+                          title={canCancelRegistration
+                            ? "Hủy đăng ký hoạt động"
+                            : "Chỉ được hủy trước giờ diễn ra ít nhất 24 giờ"}
+                        >
+                          {canCancelRegistration ? "Hủy đăng ký" : "Đã hết hạn hủy đăng ký"}
+                        </Button>
+                      )}
+                      {isActivityFull && !isRegistered && !activity.is_registration_required && (
+                        <Badge variant="outline" className="bg-red-50 text-red-700 p-2 justify-center">
+                          Hoạt động đã đủ số người tham gia
+                        </Badge>
                       )}
                       {(!activity.is_registration_required || isRegistered) && (studentStatus === "registered" || !studentStatus) && (
                         <div className="grid grid-cols-2 gap-2">
@@ -639,7 +762,7 @@ export default function ActivityDetail() {
                             size="sm"
                             className="bg-success text-white hover:bg-success/90 disabled:opacity-60 text-xs px-2"
                             onClick={() => setIsCheckInSimOpen(true)}
-                            disabled={!getCheckInStatus(activity).enabled}
+                            disabled={!getCheckInStatus(activity).enabled || (isActivityFull && !isRegistered)}
                           >
                             {getCheckInStatus(activity).text}
                           </Button>

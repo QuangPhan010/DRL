@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo } from "react";
-import { RefreshCw, CheckCircle2, AlertCircle, Database, FileSpreadsheet, Sparkles } from "lucide-react";
+import { RefreshCw, CheckCircle2, AlertCircle, Database, FileSpreadsheet, Sparkles, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
+import { normalizeSearch } from "@/lib/search";
 import { toast } from "sonner";
+import { useSearchParams } from "react-router-dom";
 
 interface AcademicRecord {
   studentId: string;
@@ -33,12 +36,18 @@ const academicYearOptions = () => {
 
 export default function DataSync() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [semester, setSemester] = useState("HK1");
   const [year, setYear] = useState(academicYearOptions()[1] || "");
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<AcademicRecord[]>([]);
   const [classFilter, setClassFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("search") || "");
+
+  useEffect(() => {
+    setSearchQuery(searchParams.get("search") || "");
+  }, [searchParams]);
 
   const fetchData = async () => {
     try {
@@ -110,10 +119,19 @@ export default function DataSync() {
   }, [records]);
 
   const filteredRecords = useMemo(() => {
+    const query = normalizeSearch(searchQuery);
     return records
-      .filter((r) => classFilter === "all" || r.className === classFilter)
+      .filter((record) => {
+        const matchesClass = classFilter === "all" || record.className === classFilter;
+        const matchesSearch = !query || normalizeSearch([
+          record.studentId,
+          record.fullName,
+          record.className,
+        ].join(" ")).includes(query);
+        return matchesClass && matchesSearch;
+      })
       .sort((a, b) => a.className.localeCompare(b.className, "vi") || a.studentId.localeCompare(b.studentId, "vi"));
-  }, [records, classFilter]);
+  }, [records, classFilter, searchQuery]);
 
   const pendingCount = filteredRecords.filter(r => r.status === "pending" && r.gpa !== null).length;
 
@@ -197,6 +215,29 @@ export default function DataSync() {
             </Select>
           </div>
 
+          <div className="min-w-[240px] flex-1 space-y-2">
+            <span className="text-xs font-semibold text-muted-foreground">Tìm sinh viên</span>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Nhập mã SV, họ tên hoặc lớp..."
+                className="bg-background pl-9 pr-9"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label="Xóa nội dung tìm kiếm"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
           <Badge variant="outline" className="h-10 px-4 bg-primary/5 text-primary border-primary/10">
             <Sparkles className="h-4 w-4 mr-2" /> Tiêu chí tự động hóa: GPA quy đổi thành điểm tối đa 14 (Rubric I.1)
           </Badge>
@@ -206,7 +247,9 @@ export default function DataSync() {
       <Card className="border-0 shadow-md">
         <CardHeader>
           <CardTitle className="font-display text-lg">Danh sách điểm học kỳ đào tạo</CardTitle>
-          <CardDescription>GPA quy đổi từ hệ điểm 4 sang điểm rèn luyện tương ứng</CardDescription>
+          <CardDescription>
+            GPA quy đổi từ hệ điểm 4 sang điểm rèn luyện tương ứng · Hiển thị {filteredRecords.length}/{records.length} sinh viên
+          </CardDescription>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <Table className="min-w-[850px]">

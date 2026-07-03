@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractUser, UserManager
+from django.core.validators import MinValueValidator
 from django.db import models
 
 class CustomUserManager(UserManager):
@@ -252,6 +253,10 @@ class Activity(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6, default=106.771200)
     radius_meters = models.IntegerField(default=100)
     duration_minutes = models.IntegerField(default=180)
+    max_participants = models.PositiveIntegerField(
+        default=100,
+        validators=[MinValueValidator(1)],
+    )
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
     

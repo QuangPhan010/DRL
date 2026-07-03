@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Award, CheckCircle2, Clock, XCircle, TrendingUp } from "lucide-react";
+import { Award, CheckCircle2, Clock, XCircle, TrendingUp, AlertCircle, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -35,8 +35,12 @@ export default function MyScores() {
         const evalRes = await fetch(`${API_URL}/evaluations/?studentId=${user.studentId}`, { headers });
         if (evalRes.ok) {
           const evalData = await evalRes.json();
-          // Sort by year and semester
-          const sorted = (evalData || []).sort((a: any, b: any) => a.year.localeCompare(b.year));
+          const semesterOrder: Record<string, number> = { HK1: 1, HK2: 2, HK3: 3 };
+          const sorted = (evalData || []).sort((a: any, b: any) => {
+            const yearDifference = (a.year || "").localeCompare(b.year || "");
+            if (yearDifference !== 0) return yearDifference;
+            return (semesterOrder[a.semester] || 99) - (semesterOrder[b.semester] || 99);
+          });
           setEvals(sorted);
         }
       }
@@ -55,13 +59,26 @@ export default function MyScores() {
   const latest = evals[evals.length - 1];
   const approvedEvals = evals.filter(e => e.status === "approved");
   const avg = approvedEvals.length > 0 
-    ? Math.round(approvedEvals.reduce((s, e) => s + e.total_score, 0) / approvedEvals.length) 
+    ? Math.round(approvedEvals.reduce((s, e) => s + Number(e.total_score || 0), 0) / approvedEvals.length)
     : 0;
+  const maximumScore = (evaluation: any) => {
+    const value = Number(evaluation?.maximum_score || 100);
+    return value > 0 ? value : 100;
+  };
+  const missingPoints = (evaluation: any) => Number(
+    evaluation?.points_missing
+      ?? Math.max(0, maximumScore(evaluation) - Number(evaluation?.total_score || 0))
+  );
+  const excessPoints = (evaluation: any) => Number(evaluation?.points_excess || 0);
+  const completedSemesters = evals.filter(e => missingPoints(e) === 0).length;
+  const totalMissingPoints = evals.reduce((sum, e) => sum + missingPoints(e), 0);
 
   const chartData = evals.map(e => ({ 
     name: `${e.semester} ${e.year.substring(2, 4)}`, 
-    score: e.total_score 
+    score: Number(e.total_score || 0),
+    maximum: maximumScore(e),
   }));
+  const chartMaximum = Math.max(100, ...chartData.map(item => item.maximum));
 
   const statusBadge = (s: string) => {
     if (s === "approved") return <Badge className="bg-success/15 text-success border-success/30 gap-1"><CheckCircle2 className="h-3 w-3" />Đã duyệt</Badge>;
@@ -95,10 +112,20 @@ export default function MyScores() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div>
                 <p className="text-white/80 text-sm">Học kỳ hiện tại • {latest.semester} {latest.year}</p>
-                <p className="font-display text-7xl font-bold mt-2">{latest.total_score}<span className="text-2xl text-white/70">/100</span></p>
-                <Badge className="mt-3 bg-white/20 text-white border-0 hover:bg-white/25 text-sm">{latest.classification}</Badge>
+                <p className="font-display text-7xl font-bold mt-2">{latest.total_score}<span className="text-2xl text-white/70">/{maximumScore(latest)}</span></p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge className="bg-white/20 text-white border-0 hover:bg-white/25 text-sm">{latest.classification}</Badge>
+                  <Badge className={missingPoints(latest) > 0
+                    ? "bg-red-500/80 text-white border-0"
+                    : "bg-emerald-500/80 text-white border-0"
+                  }>
+                    {missingPoints(latest) > 0
+                      ? `Thiếu ${missingPoints(latest)} điểm`
+                      : `Đã đủ ${maximumScore(latest)} điểm`}
+                  </Badge>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div className="bg-white/10 backdrop-blur rounded-xl p-4">
                   <p className="text-white/70 text-xs">Điểm TB</p>
                   <p className="font-display text-3xl font-bold mt-1">{avg}</p>
@@ -106,6 +133,14 @@ export default function MyScores() {
                 <div className="bg-white/10 backdrop-blur rounded-xl p-4">
                   <p className="text-white/70 text-xs">Số học kỳ</p>
                   <p className="font-display text-3xl font-bold mt-1">{evals.length}</p>
+                </div>
+                <div className="bg-white/10 backdrop-blur rounded-xl p-4">
+                  <p className="text-white/70 text-xs">Học kỳ đủ điểm</p>
+                  <p className="font-display text-3xl font-bold mt-1">{completedSemesters}</p>
+                </div>
+                <div className="bg-white/10 backdrop-blur rounded-xl p-4">
+                  <p className="text-white/70 text-xs">Tổng điểm còn thiếu</p>
+                  <p className="font-display text-3xl font-bold mt-1">{totalMissingPoints}</p>
                 </div>
               </div>
             </div>
@@ -126,7 +161,7 @@ export default function MyScores() {
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="name" fontSize={12} />
-                  <YAxis fontSize={12} domain={[0, 100]} />
+                  <YAxis fontSize={12} domain={[0, chartMaximum]} />
                   <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }} />
                   <Line type="monotone" dataKey="score" stroke="hsl(var(--primary))" strokeWidth={3} dot={{ r: 6, fill: "hsl(var(--primary))" }} />
                 </LineChart>
@@ -161,13 +196,39 @@ export default function MyScores() {
           <CardHeader><CardTitle className="font-display">Lịch sử các học kỳ</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {evals.slice().reverse().map(e => (
-              <div key={e.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl border bg-gradient-card hover:shadow-md transition-shadow">
+              <div key={e.id} className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-xl border bg-gradient-card hover:shadow-md transition-shadow">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-display font-semibold">{e.semester} năm {e.year}</p>
                     {statusBadge(e.status)}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">Nộp ngày {e.submitted_at?.substring(0, 10)}</p>
+                </div>
+                <div className="w-full sm:w-64 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Tiến độ học kỳ</span>
+                    <span className="font-semibold">{e.total_score}/{maximumScore(e)}</span>
+                  </div>
+                  <Progress
+                    value={Math.min(100, Number(e.total_score || 0) / maximumScore(e) * 100)}
+                    className="h-2"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {missingPoints(e) > 0 ? (
+                      <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 gap-1">
+                        <AlertCircle className="h-3 w-3" /> Thiếu {missingPoints(e)} điểm
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Đã đủ {maximumScore(e)} điểm
+                      </Badge>
+                    )}
+                    {excessPoints(e) > 0 && (
+                      <Badge variant="outline" className="bg-cyan-50 text-cyan-700 border-cyan-200 gap-1">
+                        <Sparkles className="h-3 w-3" /> Dư {excessPoints(e)} điểm
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right">

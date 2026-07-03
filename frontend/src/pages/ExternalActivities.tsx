@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Award, Plus, Upload, CheckCircle2, Clock, XCircle, AlertTriangle, Info, Calendar, MapPin, Building, ShieldAlert, FileText, Trash2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { OrganizerPicker } from "@/components/OrganizerPicker";
+import { getOrganizerStyle } from "@/lib/organizer-highlight";
+import { cn } from "@/lib/utils";
 
 interface ExternalActivity {
   id: number;
@@ -139,6 +142,15 @@ export default function ExternalActivities() {
 
   // Search/Filter states
   const [statusFilter, setStatusFilter] = useState("all");
+  const [highlightedOrganizer, setHighlightedOrganizer] = useState("all");
+  const organizers = useMemo(
+    () => Array.from(new Set(
+      activities
+        .map(activity => activity.organizer_name?.trim())
+        .filter((organizer): organizer is string => Boolean(organizer)),
+    )).sort((left, right) => left.localeCompare(right, "vi")),
+    [activities],
+  );
 
   const fetchActivities = async () => {
     try {
@@ -496,7 +508,19 @@ export default function ExternalActivities() {
                 <CardTitle className="font-display text-lg">Danh sách hoạt động đã khai báo</CardTitle>
                 <CardDescription>Tìm thấy {activities.length} bản ghi</CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Label className="text-xs text-muted-foreground whitespace-nowrap">Highlight:</Label>
+                <Select value={highlightedOrganizer} onValueChange={setHighlightedOrganizer}>
+                  <SelectTrigger className="w-[180px] h-8 text-xs">
+                    <SelectValue placeholder="Theo đơn vị" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả đơn vị</SelectItem>
+                    {organizers.map(organizer => (
+                      <SelectItem key={organizer} value={organizer}>{organizer}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Label className="text-xs text-muted-foreground whitespace-nowrap">Trạng thái:</Label>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[140px] h-8 text-xs">
@@ -539,10 +563,20 @@ export default function ExternalActivities() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {activities.map((act) => (
-                      <TableRow 
-                        key={act.id} 
-                        className={`hover:bg-muted/10 cursor-pointer ${selectedActivity?.id === act.id ? "bg-primary/5" : ""}`}
+                    {activities.map((act) => {
+                      const organizerName = act.organizer_name?.trim() || "Chưa xác định";
+                      const organizerStyle = getOrganizerStyle(organizerName);
+                      const isHighlighted = highlightedOrganizer === "all"
+                        || highlightedOrganizer === organizerName;
+                      return (
+                      <TableRow
+                        key={act.id}
+                        className={cn(
+                          "cursor-pointer transition-all hover:bg-muted/10",
+                          selectedActivity?.id === act.id && "bg-primary/5",
+                          highlightedOrganizer !== "all" && !isHighlighted && "opacity-35 grayscale",
+                          highlightedOrganizer !== "all" && isHighlighted && "bg-primary/5",
+                        )}
                         onClick={() => navigate(`/activities/${act.id}`)}
                       >
                         {!isStudent && (
@@ -552,7 +586,12 @@ export default function ExternalActivities() {
                           </TableCell>
                         )}
                         <TableCell className="font-medium text-sm">{act.activity_name}</TableCell>
-                        <TableCell className="text-sm">{act.organizer_name}</TableCell>
+                        <TableCell className="text-sm">
+                          <Badge variant="outline" className={organizerStyle.badge}>
+                            <span className={cn("mr-1.5 h-2 w-2 rounded-full", organizerStyle.dot)} />
+                            {organizerName}
+                          </Badge>
+                        </TableCell>
                         <TableCell className="text-xs whitespace-nowrap">
                           {act.start_date} → {act.end_date}
                         </TableCell>
@@ -564,7 +603,7 @@ export default function ExternalActivities() {
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )})}
                   </TableBody>
                 </Table>
               )}
@@ -601,7 +640,12 @@ export default function ExternalActivities() {
                     <Building className="h-4 w-4 shrink-0 mt-0.5" />
                     <div>
                       <span className="text-xs text-muted-foreground block">Đơn vị tổ chức</span>
-                      <span className="text-foreground font-medium">{selectedActivity.organizer_name}</span>
+                      <Badge
+                        variant="outline"
+                        className={getOrganizerStyle(selectedActivity.organizer_name).badge}
+                      >
+                        {selectedActivity.organizer_name}
+                      </Badge>
                     </div>
                   </div>
                   <div className="flex gap-2 items-start text-muted-foreground">
@@ -775,11 +819,12 @@ export default function ExternalActivities() {
               <Input id="actName" placeholder="Ví dụ: Chiến dịch mùa hè xanh 2025" value={activityName} onChange={(e) => setActivityName(e.target.value)} required />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label htmlFor="orgName">Đơn vị tổ chức <span className="text-destructive">*</span></Label>
-                <Input id="orgName" placeholder="Ví dụ: Quận đoàn 9" value={organizerName} onChange={(e) => setOrganizerName(e.target.value)} required />
-              </div>
+            <div className="space-y-4">
+              <OrganizerPicker
+                value={organizerName}
+                onChange={setOrganizerName}
+                defaultNewType="Đơn vị ngoài trường"
+              />
               <div className="space-y-1">
                 <Label htmlFor="actLocation">Địa điểm diễn ra</Label>
                 <Input id="actLocation" placeholder="Ví dụ: TPHCM" value={location} onChange={(e) => setLocation(e.target.value)} />

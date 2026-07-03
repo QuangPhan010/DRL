@@ -8,7 +8,7 @@ Hệ thống quản lý điểm rèn luyện sinh viên (ITC Point) là dự án
 
 ### 1. Chuẩn bị môi trường
 Yêu cầu hệ thống đã cài đặt sẵn:
-- **Python 3.10+**
+- **Python 3.10+** (dùng Python 3.10-3.13 nếu cần tính năng Face ID)
 - **Node.js 18+** & **pnpm** (hoặc npm/yarn)
 
 ---
@@ -19,7 +19,16 @@ Di chuyển vào thư mục dự án chứa file `requirements.txt`:
 ```bash
 # Cài đặt các thư viện cần thiết
 pip install -r requirements.txt
+
+# Cài thêm thư viện Face ID (tùy chọn, yêu cầu Python 3.10-3.13)
+pip install -r requirements-face.txt
+
+# Khởi tạo/cập nhật cơ sở dữ liệu và chạy backend
+python backend/manage.py migrate
+python backend/manage.py runserver
 ```
+
+Backend sẽ chạy tại: [http://localhost:8000/](http://localhost:8000/)
 
 ### 3. Khởi chạy React Frontend (Vite)
 

@@ -7,14 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useAuth, API_URL } from "@/contexts/AuthContext";
+import { API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { RadialTimePicker } from "./Activities";
+import { OrganizerPicker } from "@/components/OrganizerPicker";
+
+const getLocalToday = () => {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000);
+  return localDate.toISOString().slice(0, 10);
+};
 
 export default function ActivityForm() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { user } = useAuth();
   const isEditing = !!id;
 
   const [loading, setLoading] = useState(false);
@@ -30,18 +36,20 @@ export default function ActivityForm() {
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("5");
   const [criterionId, setCriterionId] = useState("");
-  const [date, setDate] = useState("2026-06-30");
+  const [date, setDate] = useState(getLocalToday);
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("11:00");
+  const [maxParticipants, setMaxParticipants] = useState("100");
+  const [registeredCount, setRegisteredCount] = useState(0);
 
   // New scope and registration fields
   const [scopeType, setScopeType] = useState<"all" | "class" | "club">("all");
   const [selectedClasses, setSelectedClasses] = useState<number[]>([]);
   const [selectedClubs, setSelectedClubs] = useState<number[]>([]);
   const [isRegistrationRequired, setIsRegistrationRequired] = useState(false);
-  const [registrationStartDate, setRegistrationStartDate] = useState("2026-06-30");
+  const [registrationStartDate, setRegistrationStartDate] = useState(getLocalToday);
   const [registrationStartTime, setRegistrationStartTime] = useState("08:00");
-  const [registrationEndDate, setRegistrationEndDate] = useState("2026-06-30");
+  const [registrationEndDate, setRegistrationEndDate] = useState(getLocalToday);
   const [registrationEndTime, setRegistrationEndTime] = useState("11:00");
 
   const [classList, setClassList] = useState<any[]>([]);
@@ -52,7 +60,7 @@ export default function ActivityForm() {
   // Off-campus fields
   const [organizerName, setOrganizerName] = useState("");
   const [location, setLocation] = useState("");
-  const [endDate, setEndDate] = useState("2026-06-30");
+  const [endDate, setEndDate] = useState(getLocalToday);
   const [activityType, setActivityType] = useState("Hoạt động xã hội");
 
   // Fetch initial data (criteria, classes, clubs, and activity if editing)
@@ -98,18 +106,21 @@ export default function ActivityForm() {
             const act = await actRes.json();
             setTitle(act.title);
             setDescription(act.description || "");
+            setOrganizerName(act.organizer || "");
             setPoints(act.points.toString());
             setCriterionId(act.criterion ? `c${act.criterion}` : "c3");
             setDate(act.date);
             setStartTime(act.start_time ? act.start_time.substring(0, 5) : "08:00");
             setEndTime(act.end_time ? act.end_time.substring(0, 5) : "11:00");
+            setMaxParticipants(String(act.max_participants || 100));
+            setRegisteredCount(act.participants?.length || 0);
             setScopeType(act.scope_type || "all");
             setSelectedClasses(act.allowed_classes || []);
             setSelectedClubs(act.allowed_clubs || []);
             setIsRegistrationRequired(!!act.is_registration_required);
 
             const toLocalDateAndTime = (isoString?: string) => {
-              if (!isoString) return { date: "2026-06-30", time: "08:00" };
+              if (!isoString) return { date: getLocalToday(), time: "08:00" };
               const d = new Date(isoString);
               const offset = d.getTimezoneOffset();
               const localDate = new Date(d.getTime() - offset * 60 * 1000);
@@ -144,6 +155,10 @@ export default function ActivityForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!organizerName.trim()) {
+      toast.error("Vui lòng chọn hoặc thêm đơn vị tổ chức.");
+      return;
+    }
     try {
       const calculateDuration = (start: string, end: string) => {
         if (!start || !end) return 180;
@@ -169,12 +184,13 @@ export default function ActivityForm() {
             points: Number(points),
             criterion: Number(criterionId.replace(/\D/g, "")) || 3,
             date,
-            organizer: user?.fullName || "Đơn vị Tổ chức",
+            organizer: organizerName.trim(),
             status: "upcoming",
             latitude: 10.850100,
             longitude: 106.771200,
             radius_meters: 100,
             duration_minutes: calculateDuration(startTime, endTime),
+            max_participants: Number(maxParticipants),
             start_time: startTime ? `${startTime}:00` : null,
             end_time: endTime ? `${endTime}:00` : null,
             scope_type: scopeType,
@@ -219,7 +235,10 @@ export default function ActivityForm() {
       } else {
         const errData = await res.json();
         console.error("Lỗi từ backend:", errData);
-        toast.error("Không thể lưu hoạt động: " + JSON.stringify(errData));
+        const capacityError = Array.isArray(errData?.max_participants)
+          ? errData.max_participants[0]
+          : errData?.max_participants;
+        toast.error(capacityError || errData?.error || "Không thể lưu hoạt động.");
       }
     } catch (err) {
       console.error("Lỗi kết nối:", err);
@@ -321,6 +340,11 @@ export default function ActivityForm() {
                     <Label htmlFor="description">Mô tả hoạt động</Label>
                     <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Mô tả nội dung, thời gian và địa điểm..." className="min-h-24" />
                   </div>
+                  <OrganizerPicker
+                    value={organizerName}
+                    onChange={setOrganizerName}
+                    defaultNewType="Đoàn - Hội"
+                  />
 
                   {/* Points and Criterion */}
                   <div className="grid grid-cols-2 gap-4">
@@ -337,6 +361,25 @@ export default function ActivityForm() {
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="maxParticipants">Số người được đăng ký tối đa</Label>
+                    <Input
+                      id="maxParticipants"
+                      type="number"
+                      value={maxParticipants}
+                      onChange={(e) => setMaxParticipants(e.target.value)}
+                      required
+                      min={Math.max(1, registeredCount)}
+                      step="1"
+                    />
+                    {isEditing && (
+                      <p className="text-xs text-muted-foreground">
+                        Hiện có {registeredCount} sinh viên đăng ký. Bạn có thể tăng hoặc giảm giới hạn,
+                        nhưng không thấp hơn số đã đăng ký.
+                      </p>
+                    )}
                   </div>
 
                   {/* Date and Times */}
@@ -562,13 +605,14 @@ export default function ActivityForm() {
                   </div>
                 </>
               ) : (
-                <>
-                  {/* Off-campus options */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="orgName">Đơn vị tổ chức</Label>
-                      <Input id="orgName" value={organizerName} onChange={e => setOrganizerName(e.target.value)} required placeholder="Ví dụ: Quận đoàn 9..." />
-                    </div>
+              <>
+                {/* Off-campus options */}
+                  <OrganizerPicker
+                    value={organizerName}
+                    onChange={setOrganizerName}
+                    defaultNewType="Đơn vị ngoài trường"
+                  />
+                  <div className="grid grid-cols-1 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="location">Địa điểm diễn ra</Label>
                       <Input id="location" value={location} onChange={e => setLocation(e.target.value)} required placeholder="Ví dụ: Quận 9, TPHCM..." />

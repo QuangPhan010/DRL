@@ -1,4 +1,5 @@
 import math
+import datetime
 from django.utils import timezone
 from django.db import transaction
 from rest_framework import viewsets, status, permissions
@@ -18,20 +19,20 @@ from .serializers import (
     ExternalActivitySerializer, EvidenceFileSerializer, EvidenceReviewSerializer, FraudFlagSerializer
 )
 
-FACE_MATCH_THRESHOLD = 0.55
-FACE_PRESENTATION_THRESHOLD = 0.60
-
-
 import base64
 import numpy as np
-import cv2
-from deepface import DeepFace
 
 FACE_MATCH_THRESHOLD = 0.60
 FACE_PRESENTATION_THRESHOLD = 0.60
 
 def extract_face_embedding_from_base64(base64_str):
     try:
+        # Face recognition is optional because its native dependencies do not
+        # support every Python version that can run the rest of the API.
+        # Import lazily so a missing ML runtime cannot prevent Django starting.
+        import cv2
+        from deepface import DeepFace
+
         if ',' in base64_str:
             base64_str = base64_str.split(',')[1]
         img_data = base64.b64decode(base64_str)
@@ -50,6 +51,11 @@ def extract_face_embedding_from_base64(base64_str):
             objs = sorted(objs, key=lambda face: face["facial_area"]["w"] * face["facial_area"]["h"], reverse=True)
             
         return objs[0]["embedding"], None
+    except ImportError:
+        return None, (
+            "Tính năng nhận diện khuôn mặt chưa được cài đặt. "
+            "Hãy cài các gói trong requirements-face.txt bằng Python 3.10-3.13."
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -66,11 +72,17 @@ def _face_similarity(reference, candidate):
     try:
         a = np.array([float(x) for x in reference])
         b = np.array([float(x) for x in candidate])
+        if not np.all(np.isfinite(a)) or not np.all(np.isfinite(b)):
+            return 0.0
         norm_a = np.linalg.norm(a)
         norm_b = np.linalg.norm(b)
         if norm_a == 0 or norm_b == 0:
             return 0.0
         similarity = np.dot(a, b) / (norm_a * norm_b)
+        if not math.isfinite(similarity):
+            return 0.0
+        if similarity >= 1.0 - 1e-12:
+            return 1.0
         return float(max(min(similarity, 1.0), 0.0))
     except Exception:
         return 0.0
@@ -115,16 +127,9 @@ def _verify_attendance_face(request):
 
 
 def _verify_attendance_location(request, activity, student):
-    # Temporarily bypass GPS check
     latitude = float(request.data.get('latitude', 0.0) or 0.0)
     longitude = float(request.data.get('longitude', 0.0) or 0.0)
     accuracy = float(request.data.get('accuracy', 10.0) or 10.0)
-    return {
-        'distance': 0.0,
-        'accuracy': accuracy,
-        'latitude': latitude,
-        'longitude': longitude,
-    }, None
 
     if (
         not all(math.isfinite(value) for value in (latitude, longitude, accuracy))
@@ -136,6 +141,15 @@ def _verify_attendance_location(request, activity, student):
             {'error': 'Dữ liệu GPS không hợp lệ.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+    # Distance enforcement is temporarily disabled, but malformed GPS data
+    # must still be rejected before it can reach attendance records.
+    return {
+        'distance': 0.0,
+        'accuracy': accuracy,
+        'latitude': latitude,
+        'longitude': longitude,
+    }, None
 
     maximum_accuracy = max(int(activity.radius_meters or 100), 100)
     if accuracy > maximum_accuracy:
@@ -188,6 +202,81 @@ def _verify_attendance_location(request, activity, student):
         'accuracy': accuracy,
         'distance': distance,
     }, None
+
+
+def _can_review_activity_attendance(user, activity):
+    if not user or not user.is_authenticated:
+        return False
+
+    roles = set(user.roles)
+    if roles.intersection({'admin', 'student_affairs', 'academic_affairs'}):
+        return True
+    if activity.organizer and activity.organizer == user.full_name:
+        return True
+    if user.user_organizations.filter(organization__name=activity.organizer).exists():
+        return True
+
+    if activity.scope_type == 'club':
+        return user.user_organizations.filter(
+            organization__in=activity.allowed_clubs.all(),
+            position__in=['Chủ nhiệm', 'Phó chủ nhiệm', 'Trưởng ban', 'Phụ trách'],
+        ).exists()
+
+    if activity.scope_type == 'class':
+        allowed_classes = activity.allowed_classes.all()
+        if user.role == 'advisor' and allowed_classes.filter(advisor=user).exists():
+            return True
+        student = getattr(user, 'student_profile', None)
+        return bool(
+            student
+            and student.class_info_id
+            and allowed_classes.filter(pk=student.class_info_id).exists()
+            and roles.intersection({'class_monitor', 'advisor'})
+        )
+
+    return False
+
+
+def _reserve_activity_participant(activity_id, student):
+    """Create one participant without allowing concurrent overbooking."""
+    with transaction.atomic():
+        activity = Activity.objects.select_for_update().get(pk=activity_id)
+        participant = ActivityParticipant.objects.filter(
+            activity=activity,
+            student=student,
+        ).first()
+        if participant:
+            return participant, False, False
+        if activity.participants.count() >= activity.max_participants:
+            return None, False, True
+        participant = ActivityParticipant.objects.create(
+            activity=activity,
+            student=student,
+            status='registered',
+        )
+        return participant, True, False
+
+
+def _activity_start_at(activity):
+    start_time = activity.start_time or datetime.time.min
+    starts_at = datetime.datetime.combine(activity.date, start_time)
+    return timezone.make_aware(starts_at, timezone.get_current_timezone())
+
+
+def _activity_schedule(activity):
+    starts_at = _activity_start_at(activity)
+    if activity.end_time:
+        ends_at = timezone.make_aware(
+            datetime.datetime.combine(activity.date, activity.end_time),
+            timezone.get_current_timezone(),
+        )
+        if ends_at <= starts_at:
+            ends_at += datetime.timedelta(days=1)
+    else:
+        duration = max(int(activity.duration_minutes or 180), 1)
+        ends_at = starts_at + datetime.timedelta(minutes=duration)
+    return starts_at, ends_at
+
 
 class CriteriaAdminOrReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -922,7 +1011,13 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = Evaluation.objects.all()
+        queryset = Evaluation.objects.select_related(
+            'student__class_info',
+            'criteria_set',
+        ).prefetch_related(
+            'criteria_set__criteria',
+            'details__sub_item__group__criterion',
+        )
         
         if user.is_authenticated and user.role == 'advisor':
             queryset = queryset.filter(student__class_info__advisor=user)
@@ -1068,6 +1163,144 @@ class ActivityViewSet(viewsets.ModelViewSet):
     serializer_class = ActivitySerializer
     permission_classes = [permissions.AllowAny]
 
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='export-participants',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def export_participants(self, request, pk=None):
+        import openpyxl
+        from django.http import HttpResponse
+        from openpyxl.styles import Alignment, Font, PatternFill
+
+        activity = self.get_object()
+        if not _can_review_activity_attendance(request.user, activity):
+            return Response(
+                {'error': 'Bạn không có quyền xuất danh sách tham gia hoạt động này.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        participants = list(
+            activity.participants.select_related('student').order_by(
+                'student__student_id',
+            )
+        )
+        student_ids = [participant.student_id for participant in participants]
+
+        checkins = {}
+        for checkin in activity.checkins.filter(
+            student_id__in=student_ids,
+        ).order_by('student_id', '-check_in_time'):
+            checkins.setdefault(checkin.student_id, checkin.check_in_time)
+
+        checkouts = {}
+        for checkout in activity.checkouts.filter(
+            student_id__in=student_ids,
+        ).order_by('student_id', '-check_out_time'):
+            checkouts.setdefault(checkout.student_id, checkout.check_out_time)
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = 'Danh sách tham gia'
+
+        headers = [
+            'Mã sinh viên',
+            'Họ và tên',
+            'Thời gian check-in',
+            'Thời gian check-out',
+            'Trạng thái',
+        ]
+        sheet.append(headers)
+
+        header_fill = PatternFill('solid', fgColor='1D4ED8')
+        for cell in sheet[1]:
+            cell.fill = header_fill
+            cell.font = Font(color='FFFFFF', bold=True)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        for participant in participants:
+            student = participant.student
+            check_in_time = checkins.get(student.pk)
+            check_out_time = checkouts.get(student.pk)
+            sheet.append([
+                student.student_id,
+                student.full_name,
+                timezone.localtime(check_in_time).replace(tzinfo=None) if check_in_time else None,
+                timezone.localtime(check_out_time).replace(tzinfo=None) if check_out_time else None,
+                participant.get_status_display(),
+            ])
+
+        for row in sheet.iter_rows(min_row=2, min_col=3, max_col=4):
+            for cell in row:
+                cell.number_format = 'dd/mm/yyyy hh:mm:ss'
+
+        sheet.freeze_panes = 'A2'
+        sheet.auto_filter.ref = sheet.dimensions
+        sheet.column_dimensions['A'].width = 18
+        sheet.column_dimensions['B'].width = 32
+        sheet.column_dimensions['C'].width = 24
+        sheet.column_dimensions['D'].width = 24
+        sheet.column_dimensions['E'].width = 20
+
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="activity_{activity.pk}_participants.xlsx"'
+        )
+        workbook.save(response)
+        return response
+
+    @action(
+        detail=True,
+        methods=['delete'],
+        url_path='cancel-registration',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def cancel_registration(self, request, pk=None):
+        activity = self.get_object()
+        student = getattr(request.user, 'student_profile', None)
+        if not student:
+            return Response(
+                {'error': 'Tài khoản không có hồ sơ sinh viên.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        participant = get_object_or_404(
+            ActivityParticipant,
+            activity=activity,
+            student=student,
+        )
+        if participant.status != 'registered':
+            return Response(
+                {'error': 'Chỉ có thể hủy khi đăng ký đang ở trạng thái đã đăng ký.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ActivityCheckIn.objects.filter(
+            activity=activity,
+            student=student,
+        ).exists():
+            return Response(
+                {'error': 'Không thể hủy đăng ký sau khi đã check-in.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cancellation_deadline = _activity_start_at(activity) - datetime.timedelta(
+            hours=24,
+        )
+        if timezone.now() > cancellation_deadline:
+            return Response(
+                {'error': 'Chỉ có thể hủy đăng ký trước khi hoạt động diễn ra ít nhất 24 giờ.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        participant.delete()
+        return Response({
+            'message': 'Hủy đăng ký hoạt động thành công.',
+            'activity': ActivitySerializer(activity, context={'request': request}).data,
+        })
+
     @action(detail=True, methods=['post'], url_path='register')
     def register(self, request, pk=None):
         activity = self.get_object()
@@ -1090,10 +1323,15 @@ class ActivityViewSet(viewsets.ModelViewSet):
             if activity.registration_end and now > activity.registration_end:
                 return Response({'error': 'Thời gian đăng ký tham gia hoạt động đã kết thúc.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        participant, created = ActivityParticipant.objects.get_or_create(
-            activity=activity, student=student,
-            defaults={'status': 'registered'}
+        participant, created, capacity_full = _reserve_activity_participant(
+            activity.pk,
+            student,
         )
+        if capacity_full:
+            return Response(
+                {'error': 'Hoạt động đã đủ số lượng người tham gia tối đa.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(ActivitySerializer(activity).data)
 
     @action(detail=True, methods=['post'], url_path='submit-evidence')
@@ -1146,32 +1384,39 @@ class ActivityViewSet(viewsets.ModelViewSet):
         student = request.user.student_profile
 
         # Check registration requirement
-        has_registered = ActivityParticipant.objects.filter(activity=activity, student=student).exists()
+        has_registered = ActivityParticipant.objects.filter(
+            activity=activity,
+            student=student,
+        ).exists()
         if activity.is_registration_required and not has_registered:
             return Response({'error': 'Bạn cần đăng ký trước để tham gia hoạt động này.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Auto-register student if registration is not required
         if not activity.is_registration_required and not has_registered:
-            ActivityParticipant.objects.create(activity=activity, student=student, status='registered')
+            _, _, capacity_full = _reserve_activity_participant(
+                activity.pk,
+                student,
+            )
+            if capacity_full:
+                return Response(
+                    {'error': 'Hoạt động đã đủ số lượng người tham gia tối đa.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         
-        # Check check-in timing (UTC+7 / Asia/Ho_Chi_Minh)
-        import datetime
-        import pytz
-        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        # Check check-in timing using the configured local event schedule.
         now = timezone.now()
-        
-        if activity.start_time and activity.date:
-            naive_start = datetime.datetime.combine(activity.date, activity.start_time)
-            start_dt = tz.localize(naive_start)
-            checkin_start = start_dt - datetime.timedelta(minutes=10)
-            if now < checkin_start:
-                return Response({'error': 'Hoạt động chưa mở check-in. Vui lòng quay lại trước giờ diễn ra 10 phút.'}, status=status.HTTP_400_BAD_REQUEST)
-                
-        if activity.end_time and activity.date:
-            naive_end = datetime.datetime.combine(activity.date, activity.end_time)
-            end_dt = tz.localize(naive_end)
-            if now > end_dt:
-                return Response({'error': 'Hoạt động đã kết thúc, không thể check-in.'}, status=status.HTTP_400_BAD_REQUEST)
+        event_start, event_end = _activity_schedule(activity)
+        checkin_start = event_start - datetime.timedelta(minutes=10)
+        if now < checkin_start:
+            return Response(
+                {'error': 'Hoạt động chưa mở check-in. Vui lòng quay lại trước giờ diễn ra 10 phút.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if now > event_end:
+            return Response(
+                {'error': 'Hoạt động đã kết thúc, không thể check-in.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         face_verification, face_error = _verify_attendance_face(request)
         if face_error:
@@ -1252,22 +1497,19 @@ class ActivityViewSet(viewsets.ModelViewSet):
         if not checkin_obj:
             return Response({'error': 'Bạn chưa thực hiện check-in cho hoạt động này.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check check-out timing (UTC+7 / Asia/Ho_Chi_Minh)
-        import datetime
-        import pytz
-        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        # Check-out opens after two thirds of the scheduled event duration.
         now = timezone.now()
-
-        if activity.end_time and activity.date:
-            naive_end = datetime.datetime.combine(activity.date, activity.end_time)
-            end_dt = tz.localize(naive_end)
-            checkout_start = end_dt - datetime.timedelta(minutes=10)
-            if now < checkout_start:
-                remaining_seconds = int((checkout_start - now).total_seconds())
-                remaining_mins = max(1, int(remaining_seconds / 60))
-                return Response({
-                    'error': f'Chưa thể check-out. Bạn chỉ có thể check-out trước khi kết thúc 10 phút (Còn khoảng {remaining_mins} phút nữa).'
-                }, status=status.HTTP_400_BAD_REQUEST)
+        event_start, event_end = _activity_schedule(activity)
+        checkout_start = event_start + (event_end - event_start) * (2 / 3)
+        if now < checkout_start:
+            remaining_seconds = int((checkout_start - now).total_seconds())
+            remaining_mins = max(1, math.ceil(remaining_seconds / 60))
+            return Response({
+                'error': (
+                    'Chưa thể check-out. Hoạt động phải trôi qua ít nhất 2/3 '
+                    f'thời lượng (còn khoảng {remaining_mins} phút nữa).'
+                ),
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         face_verification, face_error = _verify_attendance_face(request)
         if face_error:
@@ -1278,8 +1520,6 @@ class ActivityViewSet(viewsets.ModelViewSet):
 
         device_id = request.data.get('deviceId') or request.data.get('device_id', 'unknown_device')
         ip_addr = request.data.get('ipAddress') or request.data.get('ip_address') or request.META.get('REMOTE_ADDR', '127.0.0.1')
-
-        act_duration = int(activity.duration_minutes) if activity.duration_minutes is not None else 180
 
         # Save check-out
         checkout_obj = ActivityCheckOut.objects.create(
@@ -1303,10 +1543,16 @@ class ActivityViewSet(viewsets.ModelViewSet):
 
         if checkin_obj:
             delta = checkout_obj.check_out_time - checkin_obj.check_in_time
-            duration_mins = int(delta.total_seconds() / 60)
-            if act_duration > 0:
-                completion_pct = (duration_mins / act_duration) * 100
-                is_completed = completion_pct >= 70.0
+            duration_mins = max(0, int(delta.total_seconds() / 60))
+
+        event_duration_seconds = (event_end - event_start).total_seconds()
+        elapsed_event_seconds = (checkout_obj.check_out_time - event_start).total_seconds()
+        if event_duration_seconds > 0:
+            completion_pct = max(
+                0.0,
+                min(100.0, elapsed_event_seconds / event_duration_seconds * 100),
+            )
+        is_completed = checkout_obj.check_out_time >= checkout_start
 
         # Update Attendance
         attendance, _ = ActivityAttendance.objects.get_or_create(activity=activity, student=student)
@@ -1467,9 +1713,38 @@ class UserViewSet(viewsets.ModelViewSet):
         })
 
 class OrganizationViewSet(viewsets.ModelViewSet):
-    queryset = Organization.objects.all()
+    queryset = Organization.objects.prefetch_related('members').order_by('name')
     serializer_class = OrganizationSerializer
     permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        previous_name = serializer.instance.name
+        organization = serializer.save()
+        if organization.name != previous_name:
+            Activity.objects.filter(organizer=previous_name).update(
+                organizer=organization.name,
+            )
+            ExternalActivity.objects.filter(organizer_name=previous_name).update(
+                organizer_name=organization.name,
+            )
+
+    def destroy(self, request, *args, **kwargs):
+        organization = self.get_object()
+        is_in_use = (
+            organization.members.exists()
+            or organization.activities.exists()
+            or Activity.objects.filter(organizer=organization.name).exists()
+            or ExternalActivity.objects.filter(
+                organizer_name=organization.name,
+            ).exists()
+        )
+        if is_in_use:
+            return Response(
+                {'detail': 'Không thể xóa đơn vị đang có thành viên hoặc hoạt động sử dụng.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 class UserOrganizationViewSet(viewsets.ModelViewSet):
     queryset = UserOrganization.objects.all()

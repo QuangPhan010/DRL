@@ -130,6 +130,7 @@ export interface Activity {
   longitude?: number;
   radius_meters?: number;
   duration_minutes?: number;
+  max_participants?: number;
   start_time?: string;
   end_time?: string;
   scope_type?: "all" | "class" | "club";

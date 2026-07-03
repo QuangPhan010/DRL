@@ -16,9 +16,35 @@ class StudentClassPositionSerializer(serializers.ModelSerializer):
         fields = ('id', 'class_info', 'position', 'position_name', 'assigned_by', 'assigned_by_name', 'assigned_date')
 
 class OrganizationSerializer(serializers.ModelSerializer):
+    member_count = serializers.IntegerField(source='members.count', read_only=True)
+    activity_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Organization
-        fields = ('id', 'name', 'type')
+        fields = ('id', 'name', 'type', 'member_count', 'activity_count')
+
+    def validate_name(self, value):
+        name = value.strip()
+        queryset = Organization.objects.all()
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if any(existing.casefold() == name.casefold() for existing in queryset.values_list('name', flat=True)):
+            raise serializers.ValidationError('Đơn vị tổ chức này đã tồn tại.')
+        if not name:
+            raise serializers.ValidationError('Tên đơn vị không được để trống.')
+        return name
+
+    def validate_type(self, value):
+        organization_type = value.strip()
+        if not organization_type:
+            raise serializers.ValidationError('Loại đơn vị không được để trống.')
+        return organization_type
+
+    def get_activity_count(self, obj):
+        return (
+            Activity.objects.filter(organizer__iexact=obj.name).count()
+            + ExternalActivity.objects.filter(organizer_name__iexact=obj.name).count()
+        )
 
 class UserOrganizationSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.name', read_only=True)
@@ -196,6 +222,10 @@ class EvaluationSerializer(serializers.ModelSerializer):
     class_name = serializers.CharField(source='student.class_info.name', read_only=True)
     details = EvaluationDetailSerializer(many=True, read_only=True)
     scores = serializers.SerializerMethodField()
+    maximum_score = serializers.SerializerMethodField()
+    points_missing = serializers.SerializerMethodField()
+    points_excess = serializers.SerializerMethodField()
+    is_score_complete = serializers.SerializerMethodField()
 
     class Meta:
         model = Evaluation
@@ -203,10 +233,33 @@ class EvaluationSerializer(serializers.ModelSerializer):
             'id', 'student', 'student_name', 'class_name', 'student_id',
             'semester', 'year', 'note', 'academic_gpa', 'academic_classification',
             'raw_score', 'base_score', 'carry_in', 'carry_out', 'surplus_balance',
-            'total_score', 'classification',
+            'total_score', 'maximum_score', 'points_missing', 'points_excess',
+            'is_score_complete', 'classification',
             'status', 'submitted_at', 'reviewed_by', 'review_note',
             'class_confirmed', 'criteria_set', 'details', 'scores'
         )
+
+    def get_maximum_score(self, obj):
+        if not hasattr(obj, '_maximum_score_cache'):
+            obj._maximum_score_cache = (
+                sum(item.max_score for item in obj.criteria_set.criteria.all())
+                if obj.criteria_set
+                else 100
+            )
+        return obj._maximum_score_cache
+
+    def get_points_missing(self, obj):
+        return max(0, self.get_maximum_score(obj) - obj.total_score)
+
+    def get_points_excess(self, obj):
+        calculated_balance = max(
+            0,
+            obj.raw_score - self.get_maximum_score(obj) - obj.carry_out,
+        )
+        return max(obj.surplus_balance, calculated_balance)
+
+    def get_is_score_complete(self, obj):
+        return self.get_points_missing(obj) == 0
 
     def get_scores(self, obj):
         # Return key-value pairs of criterion_id: score
@@ -248,10 +301,33 @@ class ActivityParticipantSerializer(serializers.ModelSerializer):
 class ActivitySerializer(serializers.ModelSerializer):
     participants = ActivityParticipantSerializer(many=True, read_only=True)
     check_in_time = serializers.SerializerMethodField()
+    max_participants = serializers.IntegerField(min_value=1, default=100)
 
     class Meta:
         model = Activity
-        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'check_in_time', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end')
+        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'max_participants', 'check_in_time', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end')
+
+    def validate_organizer(self, value):
+        organizer = value.strip()
+        if not Organization.objects.filter(name__iexact=organizer).exists():
+            raise serializers.ValidationError(
+                'Đơn vị tổ chức chưa có trong danh mục. Vui lòng thêm đơn vị trước.'
+            )
+        return organizer
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance:
+            maximum = attrs.get('max_participants', self.instance.max_participants)
+            current_count = self.instance.participants.count()
+            if maximum < current_count:
+                raise serializers.ValidationError({
+                    'max_participants': (
+                        f'Số người tối đa không thể nhỏ hơn {current_count} '
+                        'sinh viên đã đăng ký.'
+                    ),
+                })
+        return attrs
 
     def get_check_in_time(self, obj):
         request = self.context.get('request')
@@ -340,5 +416,13 @@ class ExternalActivitySerializer(serializers.ModelSerializer):
     class Meta:
         model = ExternalActivity
         fields = '__all__'
+
+    def validate_organizer_name(self, value):
+        organizer = value.strip()
+        if not Organization.objects.filter(name__iexact=organizer).exists():
+            raise serializers.ValidationError(
+                'Đơn vị tổ chức chưa có trong danh mục. Vui lòng thêm đơn vị trước.'
+            )
+        return organizer
 
 

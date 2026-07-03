@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileCheck, Settings, GraduationCap, User as UserIcon, Sparkles,
-  CalendarDays, ClipboardCheck, RefreshCw, ShieldAlert, Award, Clock, FileUp, ListChecks
+  CalendarDays, ClipboardCheck, RefreshCw, ShieldAlert, Award, Clock, FileUp, ListChecks, Building2
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -18,6 +18,7 @@ const navItems: NavItem[] = [
   { title: "Tổng quan", url: "/", icon: LayoutDashboard, roles: ["admin", "advisor", "student", "organizer", "class_monitor", "student_affairs", "academic_affairs"] },
   { title: "Điểm của tôi", url: "/my-scores", icon: UserIcon, roles: ["student"] },
   { title: "Quản lý hoạt động", url: "/activities", icon: CalendarDays, roles: ["student", "organizer", "class_monitor", "advisor", "student_affairs", "admin"] },
+  { title: "Đơn vị tổ chức", url: "/organizations", icon: Building2, roles: ["admin", "student_affairs", "organizer"] },
   { title: "Quản lý lớp học", url: "/classes", icon: GraduationCap, roles: ["admin", "advisor", "student_affairs", "academic_affairs"] },
   { title: "Rà soát lớp", url: "/class-review", icon: ClipboardCheck, roles: ["class_monitor"] },
   { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "student_affairs", "admin"] },

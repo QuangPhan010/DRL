@@ -21,6 +21,7 @@ import AcademicTranscriptImport from "./pages/AcademicTranscriptImport";
 import Classes from "./pages/Classes";
 import Profile from "./pages/Profile";
 import EvaluationSession from "./pages/EvaluationSession";
+import Organizations from "./pages/Organizations";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,7 @@ const App = () => (
               <Route path="/data-sync" element={<DataSync />} />
               <Route path="/academic-transcript-import" element={<AcademicTranscriptImport />} />
               <Route path="/evaluation-sessions/create" element={<EvaluationSession />} />
+              <Route path="/organizations" element={<Organizations />} />
               <Route path="/profile" element={<Profile />} />
             </Route>
 

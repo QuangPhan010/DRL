@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Plus, Search, Edit, Trash2, Filter, Download, Users as UsersIcon, Loader2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,9 +31,10 @@ const empty: Omit<Student, "id"> = {
 
 export default function Students() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [isImporting, setIsImporting] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => searchParams.get("search") || "");
   const [facultyFilter, setFacultyFilter] = useState("all");
   const [classFilter, setClassFilter] = useState("all");
   const [majorFilter, setMajorFilter] = useState("all");
@@ -55,6 +57,10 @@ export default function Students() {
   useEffect(() => {
     setCurrentPage(1);
   }, [search, facultyFilter, majorFilter, heFilter, cohortFilter, levelFilter, clbFilter]);
+
+  useEffect(() => {
+    setSearch(searchParams.get("search") || "");
+  }, [searchParams]);
 
   const isMonitor = user?.role === "class_monitor";
 
