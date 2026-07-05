@@ -3,6 +3,10 @@ import { Award, CheckCircle2, Clock, XCircle, TrendingUp, AlertCircle, Sparkles 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { classificationColor } from "@/lib/mock-data";
@@ -13,6 +17,9 @@ export default function MyScores() {
   const [evals, setEvals] = useState<any[]>([]);
   const [criteria, setCriteria] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selfScores, setSelfScores] = useState<Record<string, number>>({});
+  const [selfNote, setSelfNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const fetchMyScores = async () => {
     try {
@@ -57,6 +64,10 @@ export default function MyScores() {
   }, [user]);
 
   const latest = evals[evals.length - 1];
+  const editableEval = [...evals].reverse().find(e => e.status === "draft" || e.status === "rejected");
+  const manualCriteria = editableEval
+    ? criteria.filter(c => c.criteria_set === editableEval.criteria_set && c.is_manual)
+    : [];
   const approvedEvals = evals.filter(e => e.status === "approved");
   const avg = approvedEvals.length > 0 
     ? Math.round(approvedEvals.reduce((s, e) => s + Number(e.total_score || 0), 0) / approvedEvals.length)
@@ -83,7 +94,47 @@ export default function MyScores() {
   const statusBadge = (s: string) => {
     if (s === "approved") return <Badge className="bg-success/15 text-success border-success/30 gap-1"><CheckCircle2 className="h-3 w-3" />Đã duyệt</Badge>;
     if (s === "pending" || s === "class_pending" || s === "advisor_pending") return <Badge className="bg-warning/15 text-warning border-warning/30 gap-1"><Clock className="h-3 w-3" />Chờ duyệt</Badge>;
+    if (s === "draft") return <Badge className="bg-primary/10 text-primary border-primary/20 gap-1"><Clock className="h-3 w-3" />Chờ tự đánh giá</Badge>;
     return <Badge className="bg-destructive/15 text-destructive border-destructive/30 gap-1"><XCircle className="h-3 w-3" />Từ chối</Badge>;
+  };
+
+  useEffect(() => {
+    if (!editableEval) return;
+    const nextScores: Record<string, number> = {};
+    (editableEval.details || []).forEach((detail: any) => {
+      nextScores[String(detail.sub_item_id)] = Number(detail.score || 0);
+    });
+    setSelfScores(nextScores);
+    setSelfNote(editableEval.note || "");
+  }, [editableEval?.id]);
+
+  const changeSelfScore = (subItemId: number, score: number) => {
+    setSelfScores(current => ({
+      ...current,
+      [String(subItemId)]: Number.isFinite(score) ? score : 0,
+    }));
+  };
+
+  const submitSelfAssessment = async () => {
+    if (!editableEval) return;
+    try {
+      setSubmitting(true);
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${API_URL}/evaluations/${editableEval.id}/submit-self-assessment/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ scores: selfScores, note: selfNote }),
+      });
+      if (!res.ok) throw new Error("Không thể nộp phiếu tự đánh giá");
+      toast.success("Đã nộp phiếu tự đánh giá lên cán bộ lớp");
+      fetchMyScores();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không thể nộp phiếu tự đánh giá");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) {
@@ -192,6 +243,57 @@ export default function MyScores() {
       )}
 
       {evals.length > 0 && (
+        <>
+        {editableEval && manualCriteria.length > 0 && (
+          <Card className="border-0 shadow-md">
+            <CardHeader>
+              <CardTitle className="font-display">Tự đánh giá tiêu chí thủ công</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="rounded-xl border bg-primary/5 p-4 text-sm">
+                Phiếu {editableEval.semester} {editableEval.year} đã được CTSV mở. Bạn tự chấm các tiêu chí chưa thể tính tự động, sau đó gửi cho cán bộ lớp rà soát.
+              </div>
+              {manualCriteria.map(c => (
+                <div key={c.id} className="space-y-3 rounded-xl border p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold"><span className="text-primary">{c.code}.</span> {c.name}</p>
+                      <p className="text-xs text-muted-foreground">Tối đa {c.max_score} điểm</p>
+                    </div>
+                    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Sinh viên tự đánh giá</Badge>
+                  </div>
+                  {(c.groups || []).map((group: any) => (
+                    <div key={group.id} className="space-y-2">
+                      <p className="text-xs font-bold uppercase text-muted-foreground">{group.name}</p>
+                      {(group.subItems || []).map((item: any) => (
+                        <div key={item.id} className="grid gap-2 rounded-lg bg-muted/30 p-3 sm:grid-cols-[1fr_110px] sm:items-center">
+                          <div>
+                            <p className="text-sm">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">Điểm gợi ý/tối đa: {item.max_score}</p>
+                          </div>
+                          <Input
+                            type="number"
+                            className="h-9 text-center font-semibold"
+                            value={selfScores[String(item.id)] ?? 0}
+                            onChange={event => changeSelfScore(Number(item.id), Number(event.target.value))}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ))}
+              <div className="space-y-2">
+                <Label>Ghi chú minh chứng/giải trình</Label>
+                <Textarea value={selfNote} onChange={event => setSelfNote(event.target.value)} placeholder="Nhập ghi chú cho cán bộ lớp, cố vấn hoặc CTSV..." />
+              </div>
+              <Button className="w-full bg-gradient-primary" onClick={submitSelfAssessment} disabled={submitting}>
+                {submitting ? "Đang nộp..." : "Nộp phiếu tự đánh giá"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         <Card className="border-0 shadow-md">
           <CardHeader><CardTitle className="font-display">Lịch sử các học kỳ</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -240,6 +342,7 @@ export default function MyScores() {
             ))}
           </CardContent>
         </Card>
+        </>
       )}
     </div>
   );

@@ -74,6 +74,8 @@ export default function Criteria() {
           name: c.name,
           maxScore: c.max_score,
           description: c.description || "",
+          isManual: c.is_manual || false,
+          is_manual: c.is_manual || false,
           groups: c.groups ? c.groups.map((g: any) => ({
             id: g.id.toString(),
             name: g.name,
@@ -135,6 +137,7 @@ export default function Criteria() {
   const [name, setName] = useState("");
   const [maxScore, setMaxScore] = useState(0);
   const [description, setDescription] = useState("");
+  const [isManual, setIsManual] = useState(false);
   const [groups, setGroups] = useState<GroupCriterion[]>([]);
 
   const selectedSet = criteriaSets.find(item => item.id === selectedSetId);
@@ -229,6 +232,7 @@ export default function Criteria() {
     setName("");
     setMaxScore(10);
     setDescription("");
+    setIsManual(false);
     setGroups([]);
     setOpen(true);
   };
@@ -239,6 +243,7 @@ export default function Criteria() {
     setName(c.name);
     setMaxScore(c.maxScore);
     setDescription(c.description);
+    setIsManual(Boolean(c.isManual || c.is_manual));
     setGroups(c.groups || []);
     setOpen(true);
   };
@@ -334,6 +339,7 @@ export default function Criteria() {
       name,
       maxScore,
       description,
+      isManual,
       groups: groups.map(g => ({
         name: g.name,
         isSingleChoice: g.isSingleChoice || false,
@@ -508,6 +514,11 @@ export default function Criteria() {
                         <p className="text-xs text-muted-foreground font-normal mt-0.5">{c.description}</p>
                       </div>
                       <Badge variant="secondary" className="mr-2 text-xs h-6 px-2.5">Tối đa {c.maxScore}đ</Badge>
+                      {(c.isManual || c.is_manual) && (
+                        <Badge variant="outline" className="mr-2 h-6 border-amber-200 bg-amber-50 px-2.5 text-xs text-amber-700">
+                          Sinh viên tự đánh giá
+                        </Badge>
+                      )}
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="pb-4">
@@ -650,6 +661,20 @@ export default function Criteria() {
               <Label>Mô tả chung</Label>
               <Textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Mô tả tóm tắt..." />
             </div>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/20 p-3">
+              <input
+                type="checkbox"
+                checked={isManual}
+                onChange={event => setIsManual(event.target.checked)}
+                className="mt-1 h-4 w-4"
+              />
+              <span>
+                <span className="block text-sm font-medium">Sinh viên tự đánh giá tiêu chí này</span>
+                <span className="text-xs text-muted-foreground">
+                  Các dòng cấp 3 của tiêu chí này sẽ không tự tính từ dữ liệu điểm danh/học lực; sinh viên nhập sau khi CTSV tạo phiên.
+                </span>
+              </span>
+            </label>
 
             {/* Level 2 & 3 Management */}
             <div className="border-t pt-4 space-y-4">

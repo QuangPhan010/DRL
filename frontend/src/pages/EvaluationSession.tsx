@@ -36,6 +36,7 @@ type Criterion = {
   code: string;
   name: string;
   max_score: number;
+  is_manual?: boolean;
   groups: { id: number; subItems: { id: number; name: string; max_score: number }[] }[];
 };
 type TranscriptItem = { student_code: string; gpa: number; classification: string };
@@ -309,7 +310,7 @@ export default function EvaluationSession() {
           rawCriterionScores[criterion.id] = 0;
         });
         const record = transcriptMap.get(student.student_id);
-        if (academicCriterion) {
+        if (academicCriterion && !academicCriterion.is_manual) {
           rawCriterionScores[academicCriterion.id] = academicPoints(record?.gpa ?? null);
         }
         let attendanceCount = 0;
@@ -317,7 +318,8 @@ export default function EvaluationSession() {
           const attended = (activity.participants || []).some(
             (participant) => participant.student_id === student.student_id && participant.status === "attended",
           );
-          if (attended && rawCriterionScores[activity.criterion] !== undefined) {
+          const activityCriterion = criteria.find((criterion) => criterion.id === activity.criterion);
+          if (attended && rawCriterionScores[activity.criterion] !== undefined && !activityCriterion?.is_manual) {
             rawCriterionScores[activity.criterion] += activity.points;
             attendanceCount += 1;
           }
@@ -704,6 +706,7 @@ export default function EvaluationSession() {
                   <TableHead key={criterion.id} className="min-w-28 text-center">
                     <span className="block font-bold">{criterion.code}</span>
                     <span className="text-[10px] font-normal text-muted-foreground">Tối đa {criterion.max_score}</span>
+                    {criterion.is_manual && <span className="block text-[10px] font-normal text-amber-600">SV tự đánh giá</span>}
                   </TableHead>
                 ))}
                 <TableHead className="min-w-24 text-center">Tổng điểm</TableHead>
@@ -725,6 +728,7 @@ export default function EvaluationSession() {
                       <Input
                         type="number"
                         min={0}
+                        disabled={criterion.is_manual}
                         className="mx-auto h-8 w-20 text-center font-bold"
                         value={row.rawCriterionScores?.[criterion.id] ?? row.criterionScores?.[criterion.id] ?? 0}
                         onChange={(event) => changeCriterionScore(

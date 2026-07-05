@@ -163,6 +163,7 @@ class Criterion(models.Model):
     name = models.CharField(max_length=255)
     max_score = models.IntegerField()
     description = models.TextField(blank=True, null=True)
+    is_manual = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'criterion'
@@ -210,6 +211,7 @@ class Evaluation(models.Model):
     semester = models.CharField(max_length=20) # e.g. HK1, HK2
     year = models.CharField(max_length=20) # e.g. 2024-2025
     note = models.TextField(blank=True, null=True)
+    self_submitted_at = models.DateTimeField(null=True, blank=True)
     academic_gpa = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
     academic_classification = models.CharField(max_length=50, blank=True, null=True)
     raw_score = models.IntegerField(default=0)

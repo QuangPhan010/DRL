@@ -760,6 +760,7 @@ class CriteriaSetViewSet(viewsets.ModelViewSet):
                         name=source_criterion.name,
                         max_score=source_criterion.max_score,
                         description=source_criterion.description,
+                        is_manual=source_criterion.is_manual,
                     )
                     for source_group in source_criterion.groups.all():
                         group = GroupCriterion.objects.create(
@@ -837,6 +838,7 @@ class CriterionViewSet(viewsets.ModelViewSet):
         name = request.data.get('name')
         max_score = request.data.get('maxScore') or request.data.get('max_score', 0)
         description = request.data.get('description', '')
+        is_manual = request.data.get('isManual', request.data.get('is_manual', False))
         groups_data = request.data.get('groups', [])
         criteria_set_id = request.data.get('criteria_set')
         criteria_set = (
@@ -854,7 +856,8 @@ class CriterionViewSet(viewsets.ModelViewSet):
             code=code,
             name=name,
             max_score=max_score,
-            description=description
+            description=description,
+            is_manual=is_manual,
         )
 
         from .models import GroupCriterion, SubItem
@@ -884,6 +887,7 @@ class CriterionViewSet(viewsets.ModelViewSet):
         criterion.name = request.data.get('name', criterion.name)
         criterion.max_score = request.data.get('maxScore') or request.data.get('max_score', criterion.max_score)
         criterion.description = request.data.get('description', criterion.description)
+        criterion.is_manual = request.data.get('isManual', request.data.get('is_manual', criterion.is_manual))
         criterion.save()
 
         groups_data = request.data.get('groups')
@@ -926,6 +930,34 @@ def classify_training_score(total_score):
     if total_score >= 35:
         return "Yếu"
     return "Kém"
+
+
+def recalculate_evaluation_score(evaluation):
+    criteria_set = evaluation.criteria_set
+    if not criteria_set:
+        evaluation.raw_score = 0
+        evaluation.base_score = 0
+        evaluation.total_score = 0
+        evaluation.classification = classify_training_score(0)
+        evaluation.save(update_fields=('raw_score', 'base_score', 'total_score', 'classification'))
+        return
+
+    total_score = 0
+    for criterion in criteria_set.criteria.all():
+        crit_score = sum(
+            detail.score
+            for detail in EvaluationDetail.objects.filter(
+                evaluation=evaluation,
+                sub_item__group__criterion=criterion,
+            )
+        )
+        total_score += max(0, min(criterion.max_score, crit_score))
+
+    evaluation.raw_score = total_score
+    evaluation.base_score = total_score
+    evaluation.total_score = total_score
+    evaluation.classification = classify_training_score(total_score)
+    evaluation.save()
 
 
 @transaction.atomic
@@ -1111,27 +1143,69 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             except SubItem.DoesNotExist:
                 pass
 
-        # Recalculate total score based on parent criteria constraints
-        total_score = 0
-        for criterion in criteria_set.criteria.all():
-            crit_score = 0
-            details = EvaluationDetail.objects.filter(evaluation=evaluation, sub_item__group__criterion=criterion)
-            for d in details:
-                crit_score += d.score
-            # Clamp between 0 and max_score
-            total_score += max(0, min(criterion.max_score, crit_score))
-
-        evaluation.raw_score = max(
-            total_score,
-            int(float(requested_raw_score)) if requested_raw_score not in (None, '') else total_score,
-        )
-        evaluation.base_score = total_score
-        evaluation.total_score = total_score
-        evaluation.classification = classify_training_score(total_score)
-        evaluation.save()
+        recalculate_evaluation_score(evaluation)
+        if requested_raw_score not in (None, ''):
+            requested_total = int(float(requested_raw_score))
+            if requested_total > evaluation.raw_score:
+                evaluation.raw_score = requested_total
+                evaluation.save(update_fields=('raw_score',))
         rebalance_training_score(student)
         evaluation.refresh_from_db()
         return Response(EvaluationSerializer(evaluation).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='submit-self-assessment')
+    def submit_self_assessment(self, request, pk=None):
+        evaluation = self.get_object()
+        if evaluation.status not in ('draft', 'rejected'):
+            return Response(
+                {'error': 'Phiếu này không còn ở trạng thái cho phép sinh viên tự đánh giá.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if request.user.is_authenticated:
+            student = getattr(request.user, 'student_profile', None)
+            if student and student.pk != evaluation.student_id:
+                return Response(
+                    {'error': 'Bạn chỉ được nộp phiếu đánh giá của chính mình.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        scores_data = request.data.get('scores', {})
+        note = request.data.get('note', evaluation.note or '')
+        manual_subitems = SubItem.objects.filter(
+            group__criterion__criteria_set=evaluation.criteria_set,
+            group__criterion__is_manual=True,
+        )
+        manual_subitem_ids = set(manual_subitems.values_list('id', flat=True))
+
+        with transaction.atomic():
+            if manual_subitem_ids:
+                evaluation.details.filter(sub_item_id__in=manual_subitem_ids).delete()
+            for sub_item_id, score_val in scores_data.items():
+                try:
+                    sub_item_id_int = int(sub_item_id)
+                    if sub_item_id_int not in manual_subitem_ids:
+                        continue
+                    sub_item = manual_subitems.get(id=sub_item_id_int)
+                    score = int(float(score_val or 0))
+                except (ValueError, TypeError, SubItem.DoesNotExist):
+                    continue
+                EvaluationDetail.objects.update_or_create(
+                    evaluation=evaluation,
+                    sub_item=sub_item,
+                    defaults={'score': score},
+                )
+
+            evaluation.note = note
+            evaluation.status = 'class_pending'
+            evaluation.class_confirmed = False
+            evaluation.self_submitted_at = timezone.now()
+            evaluation.save(update_fields=('note', 'status', 'class_confirmed', 'self_submitted_at'))
+            recalculate_evaluation_score(evaluation)
+
+        rebalance_training_score(evaluation.student)
+        evaluation.refresh_from_db()
+        return Response(EvaluationSerializer(evaluation).data)
 
     @action(detail=True, methods=['post'], url_path='review')
     def review(self, request, pk=None):

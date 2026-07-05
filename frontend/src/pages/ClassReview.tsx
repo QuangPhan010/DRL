@@ -53,7 +53,7 @@ export default function ClassReview() {
       }
 
       // 3. Fetch evaluations for class
-      const evalRes = await fetch(`${API_URL}/evaluations/?className=${encodeURIComponent(detectedClass)}&semester=HK1&year=2024-2025`, { headers });
+      const evalRes = await fetch(`${API_URL}/evaluations/?className=${encodeURIComponent(detectedClass)}`, { headers });
       if (evalRes.ok) {
         const evalData = await evalRes.json();
         setEvals(evalData);
@@ -218,7 +218,7 @@ export default function ClassReview() {
       <Card className="border-0 shadow-md">
         <CardHeader>
           <CardTitle className="font-display text-lg">Danh sách rèn luyện lớp {className}</CardTitle>
-          <CardDescription>Học kỳ 1 năm học 2024-2025</CardDescription>
+          <CardDescription>Các phiếu đang chờ cán bộ lớp rà soát sau khi sinh viên tự đánh giá.</CardDescription>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <Table className="min-w-[750px]">

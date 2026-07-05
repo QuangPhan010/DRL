@@ -81,6 +81,8 @@ export interface Criterion {
   name: string;
   maxScore: number;
   description: string;
+  isManual?: boolean;
+  is_manual?: boolean;
   groups?: GroupCriterion[];
 }
 

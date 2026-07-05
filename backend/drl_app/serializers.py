@@ -206,7 +206,7 @@ class CriterionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Criterion
-        fields = ('id', 'criteria_set', 'code', 'name', 'max_score', 'description', 'groups')
+        fields = ('id', 'criteria_set', 'code', 'name', 'max_score', 'description', 'is_manual', 'groups')
 
 class EvaluationDetailSerializer(serializers.ModelSerializer):
     sub_item_id = serializers.IntegerField(source='sub_item.id')
@@ -235,7 +235,7 @@ class EvaluationSerializer(serializers.ModelSerializer):
             'raw_score', 'base_score', 'carry_in', 'carry_out', 'surplus_balance',
             'total_score', 'maximum_score', 'points_missing', 'points_excess',
             'is_score_complete', 'classification',
-            'status', 'submitted_at', 'reviewed_by', 'review_note',
+            'status', 'submitted_at', 'self_submitted_at', 'reviewed_by', 'review_note',
             'class_confirmed', 'criteria_set', 'details', 'scores'
         )
 
