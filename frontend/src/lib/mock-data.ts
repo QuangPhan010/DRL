@@ -427,7 +427,7 @@ export const mockCriteria: Criterion[] = [
 
 export function classify(total: number): string {
   if (total >= 90) return "Xuất sắc";
-  if (total >= 80) return "Tốt";
+  if (total >= 80) return "Giỏi";
   if (total >= 65) return "Khá";
   if (total >= 50) return "Trung bình";
   if (total >= 35) return "Yếu";
@@ -437,7 +437,7 @@ export function classify(total: number): string {
 export function classificationColor(c: string): string {
   switch (c) {
     case "Xuất sắc": return "bg-gradient-primary text-primary-foreground";
-    case "Tốt": return "bg-success/15 text-success border-success/30";
+    case "Giỏi": return "bg-success/15 text-success border-success/30";
     case "Khá": return "bg-primary/10 text-primary border-primary/20";
     case "Trung bình": return "bg-warning/15 text-warning border-warning/30";
     case "Yếu": return "bg-orange-100 text-orange-700 border-orange-200";
@@ -479,7 +479,7 @@ export const mockEvaluations: Evaluation[] = mockStudents.flatMap((s, idx) =>
 );
 
 export const distributionData = (() => {
-  const buckets = { "Xuất sắc": 0, "Tốt": 0, "Khá": 0, "Trung bình": 0, "Yếu": 0, "Kém": 0 };
+  const buckets = { "Xuất sắc": 0, "Giỏi": 0, "Khá": 0, "Trung bình": 0, "Yếu": 0, "Kém": 0 };
   mockEvaluations.filter(e => e.status === "approved").forEach(e => {
     buckets[e.classification as keyof typeof buckets]++;
   });

@@ -14,6 +14,7 @@ import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { classificationColor } from "@/lib/mock-data";
 import { normalizeSearch } from "@/lib/search";
 import { toast } from "sonner";
+import Loading from "./Loading";
 
 export default function Approvals() {
   const { user } = useAuth();
@@ -178,12 +179,7 @@ export default function Approvals() {
   ];
 
   if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-2">
-        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
-        <p className="text-sm text-muted-foreground font-medium">Đang tải dữ liệu xét duyệt...</p>
-      </div>
-    );
+    return <Loading message="Đang tải dữ liệu xét duyệt..." />;
   }
 
   return (

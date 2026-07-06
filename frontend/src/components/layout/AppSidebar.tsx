@@ -26,7 +26,7 @@ const navItems: NavItem[] = [
   { title: "Đồng bộ điểm học tập", url: "/data-sync", icon: RefreshCw, roles: ["academic_affairs", "admin"] },
   { title: "Nhập bảng điểm PDF", url: "/academic-transcript-import", icon: FileUp, roles: ["academic_affairs", "admin"] },
   { title: "Quản lý sinh viên", url: "/students", icon: Users, roles: ["admin", "advisor", "student_affairs", "class_monitor"] },
-  { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin", "student_affairs"] },
+  { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin", "student_affairs", "student", "class_monitor", "advisor", "organizer", "academic_affairs"] },
   { title: "Cấu hình hệ thống", url: "/settings", icon: Settings, roles: ["admin"] },
 ];
 

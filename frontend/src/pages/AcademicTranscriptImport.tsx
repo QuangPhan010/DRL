@@ -59,14 +59,15 @@ type TranscriptRecord = {
   items: Item[];
 };
 
-const SUMMARY_LABELS = ["Xuất sắc", "Giỏi", "Khá", "Trung bình", "Yếu/Kém"];
+const SUMMARY_LABELS = ["Xuất sắc", "Giỏi", "Khá", "Trung bình", "Yếu", "Kém"];
 
 const getClassificationFromGPA = (gpa: number): string => {
   if (gpa >= 3.6) return "Xuất sắc";
   if (gpa >= 3.2) return "Giỏi";
   if (gpa >= 2.5) return "Khá";
   if (gpa >= 2.0) return "Trung bình";
-  return "Yếu/Kém";
+  if (gpa >= 1.0) return "Yếu";
+  return "Kém";
 };
 
 const MATCH_STATUS_ORDER: Record<string, number> = { MATCHED: 0, NOT_FOUND: 1, DUPLICATE: 2, CLASS_MISMATCH: 3 };
@@ -136,7 +137,11 @@ const mapItem = (item: any): Item => ({
   student_code: item.student_code ?? "",
   full_name: item.full_name ?? "",
   gpa: toNum(item.gpa),
-  classification: item.classification === "Chưa xếp loại" ? "Chưa xếp loại" : getClassificationFromGPA(toNum(item.gpa)),
+  classification: item.classification === "Chưa xếp loại"
+    ? "Chưa xếp loại"
+    : (item.classification === "Yếu/Kém" || item.classification === "Yếu / Kém" || !item.classification)
+      ? getClassificationFromGPA(toNum(item.gpa))
+      : item.classification,
   match_status: item.match_status ?? item.status ?? "NOT_FOUND",
   remark: item.remark ?? "",
 });

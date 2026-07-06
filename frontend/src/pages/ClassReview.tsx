@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { classificationColor } from "@/lib/mock-data";
 import { toast } from "sonner";
+import Loading from "./Loading";
 
 export default function ClassReview() {
   const { user } = useAuth();
@@ -148,12 +149,7 @@ export default function ClassReview() {
   };
 
   if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-2">
-        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
-        <p className="text-sm text-muted-foreground font-medium">Đang tải dữ liệu rà soát lớp...</p>
-      </div>
-    );
+    return <Loading message="Đang tải dữ liệu rà soát lớp..." />;
   }
 
   return (

@@ -277,7 +277,7 @@ class Command(BaseCommand):
                     if total_score >= 90:
                         eval_obj.classification = "Xuất sắc"
                     elif total_score >= 80:
-                        eval_obj.classification = "Tốt"
+                        eval_obj.classification = "Giỏi"
                     elif total_score >= 65:
                         eval_obj.classification = "Khá"
                     elif total_score >= 50:

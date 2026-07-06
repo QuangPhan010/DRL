@@ -10,14 +10,21 @@ from django.contrib.auth import authenticate
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag
+from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag, SystemConfig, Notification
 from .serializers import (
     UserSerializer, ClassInfoSerializer, StudentSerializer, CriteriaSetSerializer, CriterionSerializer,
     EvaluationSerializer, ActivitySerializer, ActivityParticipantSerializer,
     OrganizationSerializer, UserOrganizationSerializer, ClassPositionSerializer, StudentClassPositionSerializer,
     ActivityCheckInSerializer, ActivityCheckOutSerializer, ActivityAttendanceSerializer, FraudDetectionSerializer, AuditLogSerializer, ChangeRequestSerializer,
-    ExternalActivitySerializer, EvidenceFileSerializer, EvidenceReviewSerializer, FraudFlagSerializer
+    ExternalActivitySerializer, EvidenceFileSerializer, EvidenceReviewSerializer, FraudFlagSerializer, SystemConfigSerializer,
+    NotificationSerializer
 )
+
+def create_notification(user, title, message):
+    try:
+        Notification.objects.create(user=user, title=title, message=message)
+    except Exception as e:
+        print(f"Error creating notification: {e}")
 
 import base64
 import numpy as np
@@ -41,6 +48,20 @@ def extract_face_embedding_from_base64(base64_str):
         if img is None:
             return None, "Dữ liệu ảnh không hợp lệ."
         
+        # Downscale image to max 480px width/height to speed up face detection and extraction significantly
+        max_dim = 480
+        h, w = img.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            img = cv2.resize(img, (int(w * scale), int(h * scale)))
+        
+        # Heuristic for cartoon/anime image detection
+        # Resize to 100x100 and count unique colors to detect flat shading of cartoon/illustrations
+        resized = cv2.resize(img, (100, 100))
+        unique_colors = len(np.unique(resized.reshape(-1, 3), axis=0))
+        if unique_colors < 1000:
+            return None, "Ảnh đại diện phải là ảnh thật có mặt của bạn. Không được sử dụng ảnh hoạt hình, ảnh vẽ hoặc ảnh đồ họa."
+
         # Extract embedding using DeepFace (using Facenet model)
         objs = DeepFace.represent(img_path=img, model_name="Facenet", enforce_detection=True)
         if len(objs) == 0:
@@ -919,10 +940,32 @@ class CriterionViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
 def classify_training_score(total_score):
+    try:
+        config, created = SystemConfig.objects.get_or_create(
+            key="training_score_scale",
+            defaults={
+                "value": [
+                    {"min_score": 90, "label": "Xuất sắc"},
+                    {"min_score": 80, "label": "Giỏi"},
+                    {"min_score": 65, "label": "Khá"},
+                    {"min_score": 50, "label": "Trung bình"},
+                    {"min_score": 35, "label": "Yếu"},
+                    {"min_score": 0, "label": "Kém"}
+                ],
+                "description": "Thang điểm xếp loại điểm rèn luyện"
+            }
+        )
+        scale = config.value
+        scale = sorted(scale, key=lambda x: x.get('min_score', 0), reverse=True)
+        for entry in scale:
+            if total_score >= entry.get('min_score', 0):
+                return entry.get('label', 'Kém')
+    except Exception:
+        pass
     if total_score >= 90:
         return "Xuất sắc"
     if total_score >= 80:
-        return "Tốt"
+        return "Giỏi"
     if total_score >= 65:
         return "Khá"
     if total_score >= 50:
@@ -930,6 +973,87 @@ def classify_training_score(total_score):
     if total_score >= 35:
         return "Yếu"
     return "Kém"
+
+
+def sync_evaluation_with_transcript(evaluation):
+    """Automatically synchronizes evaluation GPA and classification with the latest imported transcript."""
+    from .models import TranscriptImportItem, EvaluationDetail, SubItem
+    import re
+
+    def clean_name(name):
+        name = name.lower()
+        accents = {
+            'a': 'áàảãạăắằẳẵặâấầẩẫậ',
+            'd': 'đ',
+            'e': 'éèẻẽẹêếềểễệ',
+            'i': 'íìỉĩị',
+            'o': 'óòỏõọôốồổỗộơớờởỡợ',
+            'u': 'úùủũụưứừửữự',
+            'y': 'ýỳỷỹỵ'
+        }
+        for char, group in accents.items():
+            for g in group:
+                name = name.replace(g, char)
+        return re.sub(r'[^a-z0-9]', '', name)
+
+    transcript_item = TranscriptImportItem.objects.filter(
+        student=evaluation.student,
+        transcript_import__semester=evaluation.semester,
+        transcript_import__school_year=evaluation.year,
+        transcript_import__status='IMPORTED'
+    ).order_by('-transcript_import__uploaded_at', '-id').first()
+
+    if transcript_item:
+        changed = False
+        if evaluation.academic_gpa != transcript_item.gpa:
+            evaluation.academic_gpa = transcript_item.gpa
+            changed = True
+        if evaluation.academic_classification != transcript_item.classification:
+            evaluation.academic_classification = transcript_item.classification
+            changed = True
+
+        if evaluation.criteria_set:
+            academic_criteria = [
+                c for c in evaluation.criteria_set.criteria.all()
+                if 'hocluc' in clean_name(c.name) or 'hoctap' in clean_name(c.name) or 'academic' in clean_name(c.name)
+            ]
+            for criterion in academic_criteria:
+                if criterion.is_manual:
+                    continue
+                sub_items = SubItem.objects.filter(group__criterion=criterion)
+                classif_clean = clean_name(transcript_item.classification)
+                
+                matched_sub_item = None
+                for sub in sub_items:
+                    sub_clean = clean_name(sub.name)
+                    if classif_clean in sub_clean or sub_clean in classif_clean:
+                        matched_sub_item = sub
+                        break
+                
+                if not matched_sub_item and sub_items.exists():
+                    matched_sub_item = sub_items.first()
+
+                if matched_sub_item:
+                    score_val = matched_sub_item.max_score
+                    deleted_count, _ = EvaluationDetail.objects.filter(
+                        evaluation=evaluation,
+                        sub_item__group__criterion=criterion
+                    ).exclude(sub_item=matched_sub_item).delete()
+                    if deleted_count > 0:
+                        changed = True
+                    
+                    detail, det_created = EvaluationDetail.objects.update_or_create(
+                        evaluation=evaluation,
+                        sub_item=matched_sub_item,
+                        defaults={'score': score_val}
+                    )
+                    if det_created or changed:
+                        changed = True
+
+        if changed:
+            evaluation.save(update_fields=('academic_gpa', 'academic_classification'))
+            recalculate_evaluation_score(evaluation)
+            rebalance_training_score(evaluation.student)
 
 
 def recalculate_evaluation_score(evaluation):
@@ -1074,6 +1198,21 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             
         return queryset
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        evals_list = list(queryset)
+        if len(evals_list) <= 120:
+            for ev in evals_list:
+                sync_evaluation_with_transcript(ev)
+        serializer = self.get_serializer(evals_list, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        sync_evaluation_with_transcript(instance)
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
     def create(self, request, *args, **kwargs):
         student_id = request.data.get('studentId') or request.data.get('student_id')
         student = get_object_or_404(Student, student_id=student_id)
@@ -1143,6 +1282,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             except SubItem.DoesNotExist:
                 pass
 
+        sync_evaluation_with_transcript(evaluation)
         recalculate_evaluation_score(evaluation)
         if requested_raw_score not in (None, ''):
             requested_total = int(float(requested_raw_score))
@@ -1203,6 +1343,27 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             evaluation.save(update_fields=('note', 'status', 'class_confirmed', 'self_submitted_at'))
             recalculate_evaluation_score(evaluation)
 
+            # Send notifications
+            if evaluation.student.class_info:
+                monitors = User.objects.filter(
+                    student_id__in=StudentClassPosition.objects.filter(
+                        class_info=evaluation.student.class_info,
+                        position__name__in=['Lớp trưởng', 'Lớp phó']
+                    ).values_list('student__student_id', flat=True)
+                )
+                for monitor in monitors:
+                    create_notification(
+                        user=monitor,
+                        title="Phiếu tự đánh giá mới cần duyệt",
+                        message=f"Sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) lớp {evaluation.student.class_info.name} đã nộp phiếu tự đánh giá HK{evaluation.semester} {evaluation.year}."
+                    )
+                if evaluation.student.class_info.advisor:
+                    create_notification(
+                        user=evaluation.student.class_info.advisor,
+                        title="Phiếu tự đánh giá mới cần duyệt",
+                        message=f"Sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) lớp {evaluation.student.class_info.name} đã nộp phiếu tự đánh giá HK{evaluation.semester} {evaluation.year}."
+                    )
+
         rebalance_training_score(evaluation.student)
         evaluation.refresh_from_db()
         return Response(EvaluationSerializer(evaluation).data)
@@ -1215,6 +1376,22 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         evaluation.status = 'advisor_pending'
         evaluation.review_note = review_note
         evaluation.save()
+
+        # Send notifications
+        student_user = User.objects.filter(student_id=evaluation.student.student_id).first()
+        if student_user:
+            create_notification(
+                user=student_user,
+                title="Phiếu rèn luyện được duyệt ở cấp lớp",
+                message=f"Phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn đã được ban cán sự lớp thông qua và chuyển lên Cố vấn học tập."
+            )
+        if evaluation.student.class_info and evaluation.student.class_info.advisor:
+            create_notification(
+                user=evaluation.student.class_info.advisor,
+                title="Phiếu rèn luyện mới chờ phê duyệt",
+                message=f"Phiếu rèn luyện của sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) đã được lớp thông qua và chờ bạn phê duyệt."
+            )
+
         return Response(EvaluationSerializer(evaluation).data)
 
     @action(detail=True, methods=['post'], url_path='approve')
@@ -1229,6 +1406,23 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         evaluation.status = status_param
         evaluation.review_note = review_note
         evaluation.save()
+
+        # Send notifications
+        student_user = User.objects.filter(student_id=evaluation.student.student_id).first()
+        if student_user:
+            if status_param == 'approved':
+                create_notification(
+                    user=student_user,
+                    title="Phiếu rèn luyện đã được duyệt hoàn tất",
+                    message=f"Cố vấn học tập đã duyệt hoàn tất phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn với tổng số điểm là {evaluation.total_score}."
+                )
+            elif status_param == 'rejected':
+                create_notification(
+                    user=student_user,
+                    title="Phiếu rèn luyện bị trả lại",
+                    message=f"Phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn đã bị từ chối/yêu cầu bổ sung bởi Cố vấn học tập. Lý do: {review_note}"
+                )
+
         return Response(EvaluationSerializer(evaluation).data)
 
 # 6. Activity ViewSet
@@ -2160,6 +2354,56 @@ class FraudFlagViewSet(viewsets.ModelViewSet):
     queryset = FraudFlag.objects.all()
     serializer_class = FraudFlagSerializer
     permission_classes = [permissions.AllowAny]
+
+
+class SystemConfigViewSet(viewsets.ModelViewSet):
+    queryset = SystemConfig.objects.all()
+    serializer_class = SystemConfigSerializer
+    lookup_field = 'key'
+    permission_classes = [permissions.AllowAny]
+
+    def retrieve(self, request, *args, **kwargs):
+        key = self.kwargs.get('key')
+        if key == 'training_score_scale':
+            config, created = SystemConfig.objects.get_or_create(
+                key=key,
+                defaults={
+                    "value": [
+                        {"min_score": 90, "label": "Xuất sắc"},
+                        {"min_score": 80, "label": "Giỏi"},
+                        {"min_score": 65, "label": "Khá"},
+                        {"min_score": 50, "label": "Trung bình"},
+                        {"min_score": 35, "label": "Yếu"},
+                        {"min_score": 0, "label": "Kém"}
+                    ],
+                    "description": "Thang điểm xếp loại điểm rèn luyện"
+                }
+            )
+            serializer = self.get_serializer(config)
+            return Response(serializer.data)
+        return super().retrieve(request, *args, **kwargs)
+
+
+class NotificationViewSet(viewsets.ModelViewSet):
+    serializer_class = NotificationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Notification.objects.filter(user=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='mark-as-read')
+    def mark_as_read(self, request, pk=None):
+        notification = self.get_object()
+        notification.unread = False
+        notification.save()
+        return Response({'status': 'marked as read'})
+
+    @action(detail=False, methods=['post'], url_path='mark-all-read')
+    def mark_all_read(self, request):
+        Notification.objects.filter(user=request.user, unread=True).update(unread=False)
+        return Response({'status': 'all marked as read'})
+
+
 
 
 

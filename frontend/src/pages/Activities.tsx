@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { CalendarDays, Plus, Users, Award, CheckCircle2, Clock, Upload, Check, Trash2, QrCode, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,67 +17,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExternalActivities from "./ExternalActivities";
 import FaceVerificationCamera, { FaceVerificationData } from "@/components/FaceVerificationCamera";
 import { getFreshAttendanceLocation, GpsPosition } from "@/lib/geolocation";
-import { getOrganizerStyle } from "@/lib/organizer-highlight";
 import { cn } from "@/lib/utils";
-import { OrganizerPicker } from "@/components/OrganizerPicker";
-
-const getLocalToday = () => {
-  const now = new Date();
-  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000);
-  return localDate.toISOString().slice(0, 10);
-};
+import { getOrganizerStyle } from "@/lib/organizer-highlight";
 
 export default function Activities() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [highlightedOrganizer, setHighlightedOrganizer] = useState("all");
-  const organizers = useMemo(
-    () => Array.from(new Set(
-      activities
-        .map(activity => activity.organizer?.trim())
-        .filter((organizer): organizer is string => Boolean(organizer)),
-    )).sort((left, right) => left.localeCompare(right, "vi")),
-    [activities],
-  );
-
-  const canReviewAttendance = (act: any) => {
-    if (!user || !act) return false;
-    // Admin / CTSV / Phòng Đào tạo luôn có quyền
-    const isStaff = userRoles.includes("admin") || userRoles.includes("student_affairs") || userRoles.includes("academic_affairs");
-    if (isStaff) return true;
-    
-    // Đơn vị tổ chức trực tiếp (khớp tên)
-    if (act.organizer === user.fullName) return true;
-
-    // Đơn vị tổ chức (khớp tổ chức của user)
-    const userOrgs = user.organizations || [];
-    const isFromOrganizingUnit = userOrgs.some((org: any) => org.organization_name === act.organizer);
-    if (isFromOrganizingUnit) return true;
-
-    // Người đồng tổ chức (Các CLB được liên kết)
-    if (act.scope_type === "club") {
-      const isLinkedClubLeader = userOrgs.some((org: any) => {
-        const isLeader = ["Chủ nhiệm", "Phó chủ nhiệm", "Trưởng ban", "Phụ trách"].includes(org.position);
-        const allowedClubIds = act.allowed_clubs || [];
-        const isClubAllowed = allowedClubIds.includes(Number(org.organization)) || allowedClubIds.includes(org.organization?.toString());
-        return isLeader && isClubAllowed;
-      });
-      if (isLinkedClubLeader) return true;
-    }
-
-    // Người đồng tổ chức (Các Lớp được liên kết)
-    if (act.scope_type === "class") {
-      const allowedClassIds = act.allowed_classes || [];
-      const isClassOfficer = userRoles.includes("class_officer") || userRoles.includes("advisor");
-      const userClassId = user.classId || user.class_info?.id;
-      const isLinkedClassLeader = isClassOfficer && userClassId && allowedClassIds.includes(Number(userClassId));
-      if (isLinkedClassLeader) return true;
-    }
-
-    return false;
-  };
 
   const parseDateTime = (dateStr?: string, timeStr?: string) => {
     if (!dateStr || !timeStr) return null;
@@ -101,24 +48,23 @@ export default function Activities() {
       setDescription("");
       setPoints("5");
       setCriterionId("c1");
-      setDate(getLocalToday());
+      setDate("2026-06-30");
       setStartTime("08:00");
       setEndTime("11:00");
-      setMaxParticipants("100");
       setIsEditing(false);
       setEditActivityId(null);
       setScope("internal");
       setOrganizerName("");
       setLocation("");
-      setEndDate(getLocalToday());
+      setEndDate("2026-06-30");
       setActivityType("Hoạt động xã hội");
       setScopeType("all");
       setSelectedClasses([]);
       setSelectedClubs([]);
       setIsRegistrationRequired(false);
-      setRegistrationStartDate(getLocalToday());
+      setRegistrationStartDate("2026-06-30");
       setRegistrationStartTime("08:00");
-      setRegistrationEndDate(getLocalToday());
+      setRegistrationEndDate("2026-06-30");
       setRegistrationEndTime("11:00");
       setClassSearch("");
       setClubSearch("");
@@ -170,30 +116,18 @@ export default function Activities() {
 
   const getCheckoutStatus = (act: Activity) => {
     if (!act.check_in_time) return { enabled: false, text: "Chưa Check-in", remaining: null };
-    const start = parseDateTime(act.date, act.start_time || "00:00");
-    if (!start) return { enabled: true, text: "Check-out Face ID", remaining: 0 };
-    let end = parseDateTime(act.date, act.end_time || "");
-    if (!end) {
-      end = new Date(start.getTime() + (act.duration_minutes || 180) * 60 * 1000);
-    } else if (end <= start) {
-      end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
-    }
-
-    const checkoutOpenTime = new Date(
-      start.getTime() + (end.getTime() - start.getTime()) * 2 / 3,
-    );
+    const duration = act.duration_minutes || 180;
+    const checkIn = new Date(act.check_in_time);
     const now = new Date();
-    const remainingMins = Math.max(
-      0,
-      Math.ceil((checkoutOpenTime.getTime() - now.getTime()) / (60 * 1000)),
-    );
+    const elapsedMins = Math.floor((now.getTime() - checkIn.getTime()) / (1000 * 60));
+    const remainingMins = duration - elapsedMins;
 
-    if (now >= checkoutOpenTime) {
-      return { enabled: true, text: "Check-out Face ID", remaining: 0 };
+    if (remainingMins <= 10) {
+      return { enabled: true, text: `Check-out Face ID (${remainingMins > 0 ? remainingMins : 0}p)`, remaining: remainingMins };
     }
     return {
       enabled: false,
-      text: `Mở check-out sau ${remainingMins}p`,
+      text: `Check-out khóa (còn ${remainingMins}p)`,
       remaining: remainingMins
     };
   };
@@ -204,10 +138,9 @@ export default function Activities() {
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("5");
   const [criterionId, setCriterionId] = useState("c1");
-  const [date, setDate] = useState(getLocalToday);
+  const [date, setDate] = useState("2026-06-30");
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("11:00");
-  const [maxParticipants, setMaxParticipants] = useState("100");
   const [isEditing, setIsEditing] = useState(false);
   const [editActivityId, setEditActivityId] = useState<string | null>(null);
 
@@ -216,13 +149,16 @@ export default function Activities() {
   const [selectedClasses, setSelectedClasses] = useState<number[]>([]);
   const [selectedClubs, setSelectedClubs] = useState<number[]>([]);
   const [isRegistrationRequired, setIsRegistrationRequired] = useState(false);
-  const [registrationStartDate, setRegistrationStartDate] = useState(getLocalToday);
+  const [registrationStartDate, setRegistrationStartDate] = useState("2026-06-30");
   const [registrationStartTime, setRegistrationStartTime] = useState("08:00");
-  const [registrationEndDate, setRegistrationEndDate] = useState(getLocalToday);
+  const [registrationEndDate, setRegistrationEndDate] = useState("2026-06-30");
   const [registrationEndTime, setRegistrationEndTime] = useState("11:00");
 
   const [classList, setClassList] = useState<any[]>([]);
   const [clubList, setClubList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [selectedOrgType, setSelectedOrgType] = useState<string>("all");
+  const [highlightedOrganizer, setHighlightedOrganizer] = useState<string>("all");
 
   // Search states for filtering classes and clubs
   const [classSearch, setClassSearch] = useState("");
@@ -231,7 +167,7 @@ export default function Activities() {
   // Off-campus fields
   const [organizerName, setOrganizerName] = useState("");
   const [location, setLocation] = useState("");
-  const [endDate, setEndDate] = useState(getLocalToday);
+  const [endDate, setEndDate] = useState("2026-06-30");
   const [activityType, setActivityType] = useState("Hoạt động xã hội");
 
   const fetchActivities = async () => {
@@ -253,7 +189,6 @@ export default function Activities() {
           longitude: act.longitude ? Number(act.longitude) : undefined,
           radius_meters: act.radius_meters ? Number(act.radius_meters) : undefined,
           duration_minutes: act.duration_minutes ? Number(act.duration_minutes) : undefined,
-          max_participants: Number(act.max_participants || 100),
           check_in_time: act.check_in_time,
           start_time: act.start_time,
           end_time: act.end_time,
@@ -322,6 +257,7 @@ export default function Activities() {
         const orgRes = await fetch(`${API_URL}/organizations/`);
         if (orgRes.ok) {
           const orgData = await orgRes.json();
+          setOrgList(orgData);
           setClubList(orgData.filter((org: any) => org.type === "CLB"));
         }
       } catch (err) {
@@ -333,10 +269,6 @@ export default function Activities() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!organizerName.trim()) {
-      toast.error("Vui lòng chọn hoặc thêm đơn vị tổ chức.");
-      return;
-    }
     try {
       const calculateDuration = (start: string, end: string) => {
         if (!start || !end) return 180;
@@ -362,13 +294,12 @@ export default function Activities() {
             points: Number(points),
             criterion: Number(criterionId.replace(/\D/g, "")) || 3,
             date,
-            organizer: organizerName.trim(),
+            organizer: user?.fullName || "Đơn vị Tổ chức",
             status: "upcoming",
             latitude: 10.850100,
             longitude: 106.771200,
             radius_meters: 100,
             duration_minutes: calculateDuration(startTime, endTime),
-            max_participants: Number(maxParticipants),
             start_time: startTime ? `${startTime}:00` : null,
             end_time: endTime ? `${endTime}:00` : null,
             scope_type: scopeType,
@@ -417,13 +348,12 @@ export default function Activities() {
         setCriterionId("c1");
         setStartTime("08:00");
         setEndTime("11:00");
-        setMaxParticipants("100");
         setIsEditing(false);
         setEditActivityId(null);
         setScope("internal");
         setOrganizerName("");
         setLocation("");
-        setEndDate(getLocalToday());
+        setEndDate("2026-06-30");
         setActivityType("Hoạt động xã hội");
       } else {
         const errData = await res.json();
@@ -439,22 +369,20 @@ export default function Activities() {
   const openEditActivity = (act: Activity) => {
     setTitle(act.title);
     setDescription(act.description || "");
-    setOrganizerName(act.organizer || "");
     setPoints(act.points.toString());
     setCriterionId(act.criterionId);
     setDate(act.date);
     setStartTime(act.start_time ? act.start_time.substring(0, 5) : "08:00");
     setEndTime(act.end_time ? act.end_time.substring(0, 5) : "11:00");
-    setMaxParticipants(String(act.max_participants || 100));
     setIsEditing(true);
     setEditActivityId(act.id);
-    
+
     // Set scope and registration states
     setScopeType(act.scope_type || "all");
     setSelectedClasses(act.allowed_classes || []);
     setSelectedClubs(act.allowed_clubs || []);
     setIsRegistrationRequired(!!act.is_registration_required);
-    
+
     const toLocalDateAndTime = (isoString?: string) => {
       if (!isoString) return { date: "", time: "08:00" };
       const d = new Date(isoString);
@@ -466,15 +394,15 @@ export default function Activities() {
         time: isoStr.slice(11, 16)
       };
     };
-    
+
     const regStartVal = toLocalDateAndTime(act.registration_start);
-    setRegistrationStartDate(regStartVal.date || getLocalToday());
+    setRegistrationStartDate(regStartVal.date || "2026-06-30");
     setRegistrationStartTime(regStartVal.time || "08:00");
-    
+
     const regEndVal = toLocalDateAndTime(act.registration_end);
-    setRegistrationEndDate(regEndVal.date || getLocalToday());
+    setRegistrationEndDate(regEndVal.date || "2026-06-30");
     setRegistrationEndTime(regEndVal.time || "11:00");
-    
+
     setIsCreateOpen(true);
   };
 
@@ -508,33 +436,7 @@ export default function Activities() {
         toast.success("Đăng ký tham gia hoạt động thành công!");
         fetchActivities();
       } else {
-        const data = await res.json().catch(() => null);
-        toast.error(data?.error || "Không thể đăng ký tham gia");
-      }
-    } catch (err) {
-      toast.error("Lỗi kết nối máy chủ");
-    }
-  };
-
-  const cancelRegistration = async (id: string) => {
-    const token = localStorage.getItem("drl_token");
-    if (!token) {
-      toast.error("Vui lòng đăng nhập để hủy đăng ký.");
-      return;
-    }
-    if (!window.confirm("Bạn có chắc muốn hủy đăng ký hoạt động này?")) return;
-
-    try {
-      const res = await fetch(`${API_URL}/activities/${id}/cancel-registration/`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => null);
-      if (res.ok) {
-        toast.success(data?.message || "Đã hủy đăng ký hoạt động.");
-        fetchActivities();
-      } else {
-        toast.error(data?.error || "Không thể hủy đăng ký hoạt động.");
+        toast.error("Không thể đăng ký tham gia");
       }
     } catch (err) {
       toast.error("Lỗi kết nối máy chủ");
@@ -591,7 +493,6 @@ export default function Activities() {
           longitude: updated.longitude ? Number(updated.longitude) : undefined,
           radius_meters: updated.radius_meters ? Number(updated.radius_meters) : undefined,
           duration_minutes: updated.duration_minutes ? Number(updated.duration_minutes) : undefined,
-          max_participants: Number(updated.max_participants || 100),
           check_in_time: updated.check_in_time,
           start_time: updated.start_time,
           end_time: updated.end_time,
@@ -664,7 +565,7 @@ export default function Activities() {
         try {
           const parsed = JSON.parse(responseText);
           errorMsg = parsed.error || errorMsg;
-        } catch(e) {}
+        } catch (e) { }
         toast.error(errorMsg);
       }
     } catch (err: any) {
@@ -711,7 +612,7 @@ export default function Activities() {
         try {
           const parsed = JSON.parse(responseText);
           errorMsg = parsed.error || errorMsg;
-        } catch(e) {}
+        } catch (e) { }
         toast.error(errorMsg);
       }
     } catch (err: any) {
@@ -721,6 +622,43 @@ export default function Activities() {
       setIsVerifying(false);
     }
   };
+
+  const uniqueOrganizers = useMemo(() => {
+    return Array.from(
+      new Set(
+        activities
+          .map((act) => act.organizer?.trim())
+          .filter((org): org is string => Boolean(org))
+      )
+    );
+  }, [activities]);
+
+  const filteredActivities = useMemo(() => {
+    return activities.filter((act) => {
+      if (selectedOrgType === "all") return true;
+      const organizerName = act.organizer?.trim() || "";
+      const matchedOrg = orgList.find(
+        (org) => org.name.toLowerCase() === organizerName.toLowerCase()
+      );
+      if (matchedOrg) {
+        return matchedOrg.type === selectedOrgType;
+      }
+      const nameLower = organizerName.toLowerCase();
+      if (selectedOrgType === "Đoàn - Hội") {
+        return nameLower.includes("đoàn") || nameLower.includes("hội");
+      }
+      if (selectedOrgType === "Khoa") {
+        return nameLower.includes("khoa");
+      }
+      if (selectedOrgType === "CLB") {
+        return nameLower.includes("clb") || nameLower.includes("câu lạc bộ");
+      }
+      if (selectedOrgType === "Phòng/Ban") {
+        return nameLower.includes("phòng") || nameLower.includes("ban");
+      }
+      return !nameLower.includes("đoàn") && !nameLower.includes("hội") && !nameLower.includes("khoa") && !nameLower.includes("clb") && !nameLower.includes("câu lạc bộ") && !nameLower.includes("phòng") && !nameLower.includes("ban");
+    });
+  }, [activities, selectedOrgType, orgList]);
 
   return (
     <div className="space-y-6">
@@ -749,61 +687,51 @@ export default function Activities() {
         </TabsList>
 
         <TabsContent value="internal" className="space-y-6 mt-6">
-          {organizers.length > 0 && (
-            <div className="rounded-xl border bg-card p-3 shadow-sm">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Highlight theo người tổ chức
-                </p>
-                {highlightedOrganizer !== "all" && (
-                  <button
-                    type="button"
-                    onClick={() => setHighlightedOrganizer("all")}
-                    className="text-xs font-medium text-primary hover:underline"
-                  >
-                    Bỏ highlight
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-2 overflow-x-auto pb-1">
+          {/* Filter & Highlight Bar */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-muted/20 rounded-xl border border-muted-foreground/10">
+            {/* Sub-tabs for Organizer Types */}
+            <div className="flex flex-wrap gap-2">
+              {["all", "Đoàn - Hội", "Khoa", "CLB", "Phòng/Ban", "Khác"].map((type) => (
                 <Button
-                  type="button"
+                  key={type}
+                  variant="ghost"
                   size="sm"
-                  variant={highlightedOrganizer === "all" ? "default" : "outline"}
-                  onClick={() => setHighlightedOrganizer("all")}
-                  className="shrink-0"
+                  onClick={() => setSelectedOrgType(type)}
+                  className={cn(
+                    "h-8 text-xs rounded-lg transition-all px-3 border",
+                    selectedOrgType === type 
+                      ? "bg-primary text-white font-medium shadow hover:bg-primary/95 hover:text-white border-transparent" 
+                      : "text-foreground bg-background border-border/80 hover:bg-muted hover:text-foreground"
+                  )}
                 >
-                  Tất cả
+                  {type === "all" ? "Tất cả đơn vị" : type}
                 </Button>
-                {organizers.map(organizer => {
-                  const style = getOrganizerStyle(organizer);
-                  return (
-                    <Button
-                      key={organizer}
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setHighlightedOrganizer(organizer)}
-                      className={cn(
-                        "shrink-0 gap-2 transition-all",
-                        style.badge,
-                        highlightedOrganizer === organizer && `ring-2 ring-offset-1 ${style.ring}`,
-                      )}
-                    >
-                      <span className={cn("h-2.5 w-2.5 rounded-full", style.dot)} />
-                      {organizer}
-                    </Button>
-                  );
-                })}
-              </div>
+              ))}
             </div>
-          )}
+
+            {/* Highlight Dropdown */}
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap font-medium">Highlight tổ chức:</Label>
+              <Select value={highlightedOrganizer} onValueChange={setHighlightedOrganizer}>
+                <SelectTrigger className="w-[200px] h-8 text-xs bg-background">
+                  <SelectValue placeholder="Chọn đơn vị" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tất cả đơn vị (Không highlight)</SelectItem>
+                  {uniqueOrganizers.map((orgName) => (
+                    <SelectItem key={orgName} value={orgName}>
+                      {orgName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {activities.map(act => {
+            {filteredActivities.map(act => {
               const isRegistered = act.participants.some(p => p.studentId === user?.studentId);
               const studentStatus = act.participants.find(p => p.studentId === user?.studentId)?.status;
-              const isFull = act.participants.length >= (act.max_participants || 100);
               const criterion = criteria.find(c => c.id === act.criterionId);
 
               const start = parseDateTime(act.date, act.start_time);
@@ -811,25 +739,18 @@ export default function Activities() {
               const now = new Date();
               const isOngoing = act.status !== "completed" && start && end && now >= start && now <= end;
               const isEnded = act.status !== "completed" && end && now > end;
-              const cancellationDeadline = parseDateTime(
-                act.date,
-                act.start_time || "00:00",
-              );
-              const canCancelRegistration = !!cancellationDeadline
-                && cancellationDeadline.getTime() - now.getTime() >= 24 * 60 * 60 * 1000;
+
               const organizerName = act.organizer?.trim() || "Chưa xác định";
               const organizerStyle = getOrganizerStyle(organizerName);
-              const isOrganizerHighlighted = highlightedOrganizer === "all"
-                || highlightedOrganizer === organizerName;
+              const isHighlighted = highlightedOrganizer === "all" || highlightedOrganizer === organizerName;
 
               return (
                 <Card
                   key={act.id}
                   className={cn(
-                    "flex flex-col justify-between border border-l-4 bg-gradient-card shadow-md transition-all duration-200",
-                    organizerStyle.border,
-                    highlightedOrganizer !== "all" && !isOrganizerHighlighted && "scale-[0.98] opacity-35 grayscale",
-                    highlightedOrganizer !== "all" && isOrganizerHighlighted && `ring-2 ring-offset-2 ${organizerStyle.ring}`,
+                    "border-0 shadow-md bg-gradient-card flex flex-col justify-between transition-all duration-300",
+                    highlightedOrganizer !== "all" && !isHighlighted && "opacity-35 grayscale scale-95",
+                    highlightedOrganizer !== "all" && isHighlighted && "ring-2 ring-primary bg-primary/5"
                   )}
                 >
                   <CardHeader>
@@ -859,7 +780,7 @@ export default function Activities() {
                     </CardTitle>
                     <div className="flex flex-wrap gap-1.5 mt-1.5">
                       <Badge variant="outline" className={cn("text-[10px] font-medium py-0.5 px-2", organizerStyle.badge)}>
-                        <span className={cn("mr-1.5 h-2 w-2 rounded-full", organizerStyle.dot)} />
+                        <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", organizerStyle.dot)} />
                         {organizerName}
                       </Badge>
                       <Badge variant="outline" className="text-[10px] bg-muted/40 font-medium py-0.5 px-2">
@@ -890,35 +811,13 @@ export default function Activities() {
                     <div className="border-t pt-3 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Users className="h-3.5 w-3.5" />
-                        <span>
-                          {act.participants.length}/{act.max_participants || 100} người đăng ký
-                        </span>
+                        <span>{act.participants.length} người đăng ký</span>
                       </div>
 
                       {userRoles.includes("student") && (
                         <div className="flex flex-wrap gap-2">
                           {!isRegistered && act.status === "upcoming" && act.is_registration_required && (
-                            <Button
-                              size="sm"
-                              onClick={() => registerActivity(act.id)}
-                              disabled={isFull}
-                            >
-                              {isFull ? "Đã đủ người" : "Đăng ký"}
-                            </Button>
-                          )}
-                          {studentStatus === "registered" && act.is_registration_required && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-                              onClick={() => cancelRegistration(act.id)}
-                              disabled={!canCancelRegistration}
-                              title={canCancelRegistration
-                                ? "Hủy đăng ký hoạt động"
-                                : "Chỉ được hủy trước giờ diễn ra ít nhất 24 giờ"}
-                            >
-                              {canCancelRegistration ? "Hủy đăng ký" : "Đã hết hạn hủy"}
-                            </Button>
+                            <Button size="sm" onClick={() => registerActivity(act.id)}>Đăng ký</Button>
                           )}
                           {/* Check-in/out buttons hidden here - handled inside detail page */}
                           {studentStatus === "attended" && (
@@ -938,29 +837,21 @@ export default function Activities() {
                       {!userRoles.includes("student") && (
                         <div className="flex flex-wrap gap-2 w-full justify-between items-center mt-2">
                           <div className="flex gap-1.5">
-                            {canReviewAttendance(act) ? (
-                              <>
-                                <Button size="xs" variant="outline" className="gap-1 border-primary/20 text-primary h-8 px-2" onClick={() => { setSelectedActivity(act); setIsQrOpen(true); }}>
-                                  <QrCode className="h-3.5 w-3.5" /> Mã QR
-                                </Button>
-                                <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
-                                  Danh sách ({act.participants.length})
-                                </Button>
-                              </>
-                            ) : (
-                              <span className="text-xs text-muted-foreground italic">Chỉ đơn vị tổ chức được rà soát</span>
-                            )}
+                            <Button size="xs" variant="outline" className="gap-1 border-primary/20 text-primary h-8 px-2" onClick={() => { setSelectedActivity(act); setIsQrOpen(true); }}>
+                              <QrCode className="h-3.5 w-3.5" /> Mã QR
+                            </Button>
+                            <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
+                              Danh sách ({act.participants.length})
+                            </Button>
                           </div>
-                          {canReviewAttendance(act) && (
-                            <div className="flex gap-1.5">
-                              <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => navigate(`/activities/${act.id}/edit`)}>
-                                Sửa
-                              </Button>
-                              <Button size="xs" className="h-8 px-2 text-red-600 border border-red-200 bg-transparent hover:bg-red-50 hover:text-red-700 transition-colors" onClick={() => handleDeleteActivity(act.id)}>
-                                Xóa
-                              </Button>
-                            </div>
-                          )}
+                          <div className="flex gap-1.5">
+                            <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => navigate(`/activities/${act.id}/edit`)}>
+                              Sửa
+                            </Button>
+                            <Button size="xs" className="h-8 px-2 text-red-600 border border-red-200 bg-transparent hover:bg-red-50 hover:text-red-700 transition-colors" onClick={() => handleDeleteActivity(act.id)}>
+                              Xóa
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1024,11 +915,6 @@ export default function Activities() {
                   <Label htmlFor="description">Mô tả hoạt động</Label>
                   <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Mô tả nội dung, thời gian và địa điểm..." />
                 </div>
-                <OrganizerPicker
-                  value={organizerName}
-                  onChange={setOrganizerName}
-                  defaultNewType="Đoàn - Hội"
-                />
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="points">Điểm rèn luyện</Label>
@@ -1043,19 +929,6 @@ export default function Activities() {
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="maxParticipants">Số người tham gia tối đa</Label>
-                  <Input
-                    id="maxParticipants"
-                    type="number"
-                    value={maxParticipants}
-                    onChange={e => setMaxParticipants(e.target.value)}
-                    required
-                    min="1"
-                    step="1"
-                    placeholder="Ví dụ: 100"
-                  />
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2 col-span-1">
@@ -1247,12 +1120,11 @@ export default function Activities() {
               </>
             ) : (
               <>
-                <OrganizerPicker
-                  value={organizerName}
-                  onChange={setOrganizerName}
-                  defaultNewType="Đơn vị ngoài trường"
-                />
-                <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="orgName">Đơn vị tổ chức</Label>
+                    <Input id="orgName" value={organizerName} onChange={e => setOrganizerName(e.target.value)} required placeholder="Ví dụ: Quận đoàn 9..." />
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="location">Địa điểm diễn ra</Label>
                     <Input id="location" value={location} onChange={e => setLocation(e.target.value)} required placeholder="Ví dụ: Quận 9, TPHCM..." />
@@ -1434,7 +1306,7 @@ export default function Activities() {
           {isVerifying && (
             <div className="absolute inset-0 bg-background/80 z-50 flex flex-col items-center justify-center gap-2">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm font-semibold">Đang đối sánh Face ID & GPS...</p>
+              <p className="text-sm font-semibold">Đang đối sánh Face ID...</p>
             </div>
           )}
           <DialogHeader>
@@ -1489,9 +1361,9 @@ export default function Activities() {
         onClose={() => setIsTimePickerOpen(false)}
         value={
           timePickerTarget === 'start' ? startTime :
-          timePickerTarget === 'end' ? endTime :
-          timePickerTarget === 'regStart' ? registrationStartTime :
-          registrationEndTime
+            timePickerTarget === 'end' ? endTime :
+              timePickerTarget === 'regStart' ? registrationStartTime :
+                registrationEndTime
         }
         onChange={(val) => {
           if (timePickerTarget === 'start') {
@@ -1506,9 +1378,9 @@ export default function Activities() {
         }}
         title={
           timePickerTarget === 'start' ? "Chọn giờ bắt đầu hoạt động" :
-          timePickerTarget === 'end' ? "Chọn giờ kết thúc hoạt động" :
-          timePickerTarget === 'regStart' ? "Chọn giờ bắt đầu đăng ký" :
-          "Chọn giờ kết thúc đăng ký"
+            timePickerTarget === 'end' ? "Chọn giờ kết thúc hoạt động" :
+              timePickerTarget === 'regStart' ? "Chọn giờ bắt đầu đăng ký" :
+                "Chọn giờ kết thúc đăng ký"
         }
       />
     </div>
@@ -1554,7 +1426,7 @@ export function RadialTimePicker({ open, onClose, value, onChange, title = "Ch�
     const x = clientX - cx;
     const y = clientY - cy;
     const distance = Math.sqrt(x * x + y * y);
-    
+
     // Calculate angle in radians, offset by -90 deg (top is 0)
     let angle = Math.atan2(y, x) + Math.PI / 2;
     if (angle < 0) angle += 2 * Math.PI;
@@ -1697,11 +1569,10 @@ export function RadialTimePicker({ open, onClose, value, onChange, title = "Ch�
           <button
             type="button"
             onClick={() => setMode('hour')}
-            className={`px-5 py-3 rounded-2xl text-4xl font-bold transition-all ${
-              mode === 'hour'
-                ? 'bg-primary/10 text-primary'
-                : 'bg-muted/40 text-muted-foreground hover:bg-muted/80'
-            }`}
+            className={`px-5 py-3 rounded-2xl text-4xl font-bold transition-all ${mode === 'hour'
+              ? 'bg-primary/10 text-primary'
+              : 'bg-muted/40 text-muted-foreground hover:bg-muted/80'
+              }`}
           >
             {selectedHour.toString().padStart(2, '0')}
           </button>
@@ -1709,11 +1580,10 @@ export function RadialTimePicker({ open, onClose, value, onChange, title = "Ch�
           <button
             type="button"
             onClick={() => setMode('minute')}
-            className={`px-5 py-3 rounded-2xl text-4xl font-bold transition-all ${
-              mode === 'minute'
-                ? 'bg-primary/10 text-primary'
-                : 'bg-muted/40 text-muted-foreground hover:bg-muted/80'
-            }`}
+            className={`px-5 py-3 rounded-2xl text-4xl font-bold transition-all ${mode === 'minute'
+              ? 'bg-primary/10 text-primary'
+              : 'bg-muted/40 text-muted-foreground hover:bg-muted/80'
+              }`}
           >
             {selectedMinute.toString().padStart(2, '0')}
           </button>
@@ -1733,13 +1603,13 @@ export function RadialTimePicker({ open, onClose, value, onChange, title = "Ch�
             >
               {/* Dial Center point */}
               <circle cx="120" cy="120" r="4" fill="var(--primary)" />
-              
+
               {/* Connecting arm line */}
               <line x1="120" y1="120" x2={indicatorCoords.x} y2={indicatorCoords.y} stroke="var(--primary)" strokeWidth="2.5" />
-              
+
               {/* Outer selector ring overlay */}
               <circle cx={indicatorCoords.x} cy={indicatorCoords.y} r="15" fill="var(--primary)" />
-              
+
               {/* Dial numbers */}
               {mode === 'hour' ? renderHourNumbers() : renderMinuteNumbers()}
             </svg>

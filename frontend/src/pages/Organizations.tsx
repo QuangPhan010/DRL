@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Edit, Loader2, Plus, Search, Trash2, Users } from "lucide-react";
+import { Building2, Edit, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { API_URL } from "@/contexts/AuthContext";
 import { normalizeSearch } from "@/lib/search";
 import { getOrganizerStyle } from "@/lib/organizer-highlight";
@@ -180,21 +180,20 @@ export default function Organizations() {
               <TableRow>
                 <TableHead>Tên đơn vị</TableHead>
                 <TableHead>Loại</TableHead>
-                <TableHead>Thành viên</TableHead>
-                <TableHead>Hoạt động sử dụng</TableHead>
+                <TableHead>Số hoạt động</TableHead>
                 <TableHead className="text-right">Thao tác</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-28 text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="h-28 text-center text-muted-foreground">
                     <Loader2 className="mr-2 inline h-5 w-5 animate-spin" /> Đang tải...
                   </TableCell>
                 </TableRow>
               ) : filteredOrganizations.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-28 text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="h-28 text-center text-muted-foreground">
                     Chưa có đơn vị tổ chức phù hợp.
                   </TableCell>
                 </TableRow>
@@ -209,7 +208,6 @@ export default function Organizations() {
                       </div>
                     </TableCell>
                     <TableCell><Badge variant="outline" className={style.badge}>{organization.type}</Badge></TableCell>
-                    <TableCell><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />{organization.member_count}</span></TableCell>
                     <TableCell>{organization.activity_count}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">

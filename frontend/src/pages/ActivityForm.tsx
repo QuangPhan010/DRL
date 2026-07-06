@@ -11,6 +11,7 @@ import { API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { RadialTimePicker } from "./Activities";
 import { OrganizerPicker } from "@/components/OrganizerPicker";
+import Loading from "./Loading";
 
 const getLocalToday = () => {
   const now = new Date();
@@ -280,7 +281,7 @@ export default function ActivityForm() {
   };
 
   if (loading) {
-    return <div className="text-center py-10">Đang tải dữ liệu hoạt động...</div>;
+    return <Loading message="Đang tải dữ liệu hoạt động..." />;
   }
 
   return (

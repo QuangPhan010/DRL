@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag
+from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag, SystemConfig, Notification
 
 class ClassPositionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -424,5 +424,18 @@ class ExternalActivitySerializer(serializers.ModelSerializer):
                 'Đơn vị tổ chức chưa có trong danh mục. Vui lòng thêm đơn vị trước.'
             )
         return organizer
+
+
+class SystemConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemConfig
+        fields = ('id', 'key', 'value', 'description')
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ('id', 'user', 'title', 'message', 'unread', 'created_at')
+
 
 

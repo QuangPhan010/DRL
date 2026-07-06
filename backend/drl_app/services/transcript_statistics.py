@@ -5,9 +5,9 @@ CLASSIFICATION_ORDER = [
     "Xuất sắc",
     "Giỏi",
     "Khá",
-    "TB Khá",
-    "TB",
+    "Trung bình",
     "Yếu",
+    "Kém",
 ]
 
 
@@ -20,10 +20,10 @@ def classify_gpa(gpa) -> str:
     if value >= Decimal("2.50"):
         return "Khá"
     if value >= Decimal("2.00"):
-        return "TB Khá"
+        return "Trung bình"
     if value >= Decimal("1.00"):
-        return "TB"
-    return "Yếu"
+        return "Yếu"
+    return "Kém"
 
 
 def build_summary(items):

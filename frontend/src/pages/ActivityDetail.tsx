@@ -14,6 +14,7 @@ import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import FaceVerificationCamera, { FaceVerificationData } from "@/components/FaceVerificationCamera";
 import { getFreshAttendanceLocation, GpsPosition } from "@/lib/geolocation";
+import Loading from "./Loading";
 
 export default function ActivityDetail() {
   const { id } = useParams();
@@ -362,12 +363,7 @@ export default function ActivityDetail() {
   };
 
   if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <div className="animate-spin h-10 w-10 border-4 border-primary border-t-transparent rounded-full" />
-        <p className="text-muted-foreground text-sm font-medium">Đang tải chi tiết hoạt động...</p>
-      </div>
-    );
+    return <Loading message="Đang tải chi tiết hoạt động..." />;
   }
 
   const getStatusBadge = (status: string) => {

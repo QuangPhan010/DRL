@@ -5,7 +5,8 @@ from .views import (
     CriteriaSetViewSet, CriterionViewSet, EvaluationViewSet, ActivityViewSet, UserViewSet,
     OrganizationViewSet, UserOrganizationViewSet, ClassPositionViewSet, StudentClassPositionViewSet,
     FraudDetectionViewSet, AuditLogViewSet, ChangeRequestViewSet,
-    ExternalActivityViewSet, EvidenceFileViewSet, EvidenceReviewViewSet, FraudFlagViewSet
+    ExternalActivityViewSet, EvidenceFileViewSet, EvidenceReviewViewSet, FraudFlagViewSet, SystemConfigViewSet,
+    NotificationViewSet
 )
 from .transcript_views import TranscriptImportViewSet
 
@@ -29,6 +30,8 @@ router.register(r'evidence-files', EvidenceFileViewSet, basename='evidence-file'
 router.register(r'evidence-reviews', EvidenceReviewViewSet, basename='evidence-review')
 router.register(r'fraud-flags', FraudFlagViewSet, basename='fraud-flag')
 router.register(r'transcripts', TranscriptImportViewSet, basename='transcript-import')
+router.register(r'configs', SystemConfigViewSet, basename='config')
+router.register(r'notifications', NotificationViewSet, basename='notification')
 
 urlpatterns = [
     path('login/', login_view, name='login'),

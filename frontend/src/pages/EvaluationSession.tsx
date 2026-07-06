@@ -14,6 +14,7 @@ import {
   Search,
   Sparkles,
   Users,
+  UploadCloud,
 } from "lucide-react";
 import { API_URL } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +28,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { normalizeSearch } from "@/lib/search";
+import Loading from "./Loading";
 
 type SchoolClass = { id: number; name: string; faculty: string; cohort: string; student_count?: number };
 type Student = { id: number; student_id: string; full_name: string; class_name: string; faculty: string; cohort: string };
@@ -63,7 +65,7 @@ const steps = [
   { title: "Phạm vi sinh viên", short: "Phạm vi", icon: Users },
   { title: "Chọn bộ tiêu chí", short: "Tiêu chí", icon: BookOpenCheck },
   { title: "Kiểm tra điểm danh", short: "Điểm danh", icon: ClipboardCheck },
-  { title: "Kiểm tra học lực", short: "Học lực", icon: Database },
+  { title: "Hoạt động tham gia", short: "Hoạt động", icon: Database },
   { title: "Tính điểm tự động", short: "Tính điểm", icon: Sparkles },
   { title: "Review kết quả", short: "Review", icon: CheckCircle2 },
   { title: "Lưu phiên", short: "Lưu", icon: Save },
@@ -85,10 +87,20 @@ const getAcademicYears = () => {
 
 const classifyScore = (score: number) => {
   if (score >= 90) return "Xuất sắc";
-  if (score >= 80) return "Tốt";
+  if (score >= 80) return "Giỏi";
   if (score >= 65) return "Khá";
   if (score >= 50) return "Trung bình";
   if (score >= 35) return "Yếu";
+  return "Kém";
+};
+
+const classifyAcademicGpa = (gpa: number | null): string => {
+  if (gpa === null) return "Chưa có dữ liệu";
+  if (gpa >= 3.6) return "Xuất sắc";
+  if (gpa >= 3.2) return "Giỏi";
+  if (gpa >= 2.5) return "Khá";
+  if (gpa >= 2.0) return "Trung bình";
+  if (gpa >= 1.0) return "Yếu";
   return "Kém";
 };
 
@@ -126,6 +138,7 @@ export default function EvaluationSession() {
   const [query, setQuery] = useState("");
   const [scores, setScores] = useState<ScoreRow[]>([]);
   const [savedCount, setSavedCount] = useState(0);
+  const [importedAttendance, setImportedAttendance] = useState<Record<string, { attended: number; absent: number }>>({});
 
   useEffect(() => {
     const loadBaseData = async () => {
@@ -273,11 +286,14 @@ export default function EvaluationSession() {
       );
       const map = new Map<string, TranscriptItem>();
       details.flatMap((item: any) => item.items || item.students || []).forEach((item: any) => {
-        if (item.student_code) map.set(item.student_code, {
-          student_code: item.student_code,
-          gpa: Number(item.gpa),
-          classification: item.classification || "",
-        });
+        if (item.student_code) {
+          const gpaVal = Number(item.gpa);
+          map.set(item.student_code, {
+            student_code: item.student_code,
+            gpa: gpaVal,
+            classification: classifyAcademicGpa(gpaVal),
+          });
+        }
       });
       setTranscripts([...map.values()]);
       setTranscriptNotice("");
@@ -290,8 +306,33 @@ export default function EvaluationSession() {
     }
   };
 
+  const handleImportAttendance = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split("\n");
+      const newImported: Record<string, { attended: number; absent: number }> = {};
+      lines.forEach((line) => {
+        const parts = line.split(",");
+        if (parts.length >= 2) {
+          const studentId = parts[0].trim();
+          const attended = parseInt(parts[1].trim()) || 0;
+          const absent = parseInt(parts[2]?.trim()) || 0;
+          if (studentId) {
+            newImported[studentId] = { attended, absent };
+          }
+        }
+      });
+      setImportedAttendance(newImported);
+      toast.success(`Đã import dữ liệu điểm danh cho ${Object.keys(newImported).length} sinh viên`);
+    };
+    reader.readAsText(file);
+  };
+
   useEffect(() => {
-    if (step === 3) loadTranscriptData();
+    if (step === 3 || step === 0) loadTranscriptData();
   }, [step, semester, year]);
 
   const calculateScores = () => {
@@ -314,16 +355,32 @@ export default function EvaluationSession() {
           rawCriterionScores[academicCriterion.id] = academicPoints(record?.gpa ?? null);
         }
         let attendanceCount = 0;
-        activities.forEach((activity) => {
-          const attended = (activity.participants || []).some(
-            (participant) => participant.student_id === student.student_id && participant.status === "attended",
-          );
-          const activityCriterion = criteria.find((criterion) => criterion.id === activity.criterion);
-          if (attended && rawCriterionScores[activity.criterion] !== undefined && !activityCriterion?.is_manual) {
-            rawCriterionScores[activity.criterion] += activity.points;
-            attendanceCount += 1;
+        const custom = importedAttendance[student.student_id];
+        if (custom) {
+          attendanceCount = custom.attended;
+          // Find class attendance or chuyên cần criterion
+          const attendanceCriterion = criteria.find(c => {
+            const name = normalizeSearch(c.name);
+            return name.includes("di hoc") || name.includes("chuyen can") || name.includes("y thuc hoc tap");
+          });
+          if (attendanceCriterion) {
+            // Assume 1 point deduction per absent session
+            const score = Math.max(0, attendanceCriterion.max_score - custom.absent);
+            rawCriterionScores[attendanceCriterion.id] = score;
           }
-        });
+        } else {
+          // If no import, we check database activities
+          activities.forEach((activity) => {
+            const attended = (activity.participants || []).some(
+              (participant) => participant.student_id === student.student_id && participant.status === "attended",
+            );
+            const activityCriterion = criteria.find((criterion) => criterion.id === activity.criterion);
+            if (attended && rawCriterionScores[activity.criterion] !== undefined && !activityCriterion?.is_manual) {
+              rawCriterionScores[activity.criterion] += activity.points;
+              attendanceCount += 1;
+            }
+          });
+        }
         criteria.forEach((criterion) => {
           criterionScores[criterion.id] = Math.max(
             0,
@@ -396,9 +453,19 @@ export default function EvaluationSession() {
   };
 
   const validateStep = () => {
-    if (step === 0 && !scopedStudents.length) {
-      toast.error("Phạm vi hiện chưa có sinh viên");
-      return false;
+    if (step === 0) {
+      if (!scopedStudents.length) {
+        toast.error("Phạm vi hiện chưa có sinh viên");
+        return false;
+      }
+      if (matchedTranscriptCount < scopedStudents.length) {
+        toast.error("Chưa đủ dữ liệu học lực của sinh viên. Vui lòng import bảng điểm trước.");
+        return false;
+      }
+      if (Object.keys(importedAttendance).length === 0) {
+        toast.error("Chưa có dữ liệu điểm danh lớp học. Vui lòng import dữ liệu điểm danh trước.");
+        return false;
+      }
     }
     if (step === 1 && !criteriaSetId) {
       toast.error("Vui lòng chọn bộ tiêu chí");
@@ -427,8 +494,21 @@ export default function EvaluationSession() {
       for (const row of scores) {
         const detailScores: Record<string, number> = {};
         criteria.forEach((criterion) => {
-          const firstSubItem = (criterion.groups || []).flatMap((group) => group.subItems || [])[0];
-          if (firstSubItem) detailScores[String(firstSubItem.id)] = row.criterionScores[criterion.id] || 0;
+          const isAcademic = normalizeSearch(criterion.name).includes("hoc luc") || normalizeSearch(criterion.name).includes("hoc tap");
+          if (isAcademic) {
+            const subItems = (criterion.groups || []).flatMap((group) => group.subItems || []);
+            const matchedSubItem = subItems.find(sub => {
+              const subName = normalizeSearch(sub.name);
+              const classif = normalizeSearch(row.academicClassification);
+              return subName.includes(classif) || classif.includes(subName);
+            }) || subItems[0];
+            if (matchedSubItem) {
+              detailScores[String(matchedSubItem.id)] = row.criterionScores[criterion.id] || 0;
+            }
+          } else {
+            const firstSubItem = (criterion.groups || []).flatMap((group) => group.subItems || [])[0];
+            if (firstSubItem) detailScores[String(firstSubItem.id)] = row.criterionScores[criterion.id] || 0;
+          }
         });
 
         const payload = {
@@ -532,9 +612,36 @@ export default function EvaluationSession() {
               </Select>
             </div>
           )}
-          <div className="rounded-xl border border-primary/15 bg-primary/5 p-4">
-            <p className="text-sm text-muted-foreground">Sinh viên trong phạm vi</p>
-            <p className="mt-1 text-3xl font-bold text-primary">{scopedStudents.length}</p>
+          <div className="rounded-xl border border-primary/15 bg-primary/5 p-4 space-y-3">
+            <div>
+              <p className="text-sm text-muted-foreground">Sinh viên trong phạm vi</p>
+              <p className="mt-1 text-3xl font-bold text-primary">{scopedStudents.length}</p>
+            </div>
+            <div className="border-t pt-3 space-y-2">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Dữ liệu học lực:</span>
+                <Badge variant={matchedTranscriptCount === scopedStudents.length && scopedStudents.length > 0 ? "success" : "warning"}>
+                  {matchedTranscriptCount} / {scopedStudents.length} SV
+                </Badge>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Dữ liệu điểm danh lớp học:</span>
+                <Badge variant={Object.keys(importedAttendance).length > 0 ? "success" : "warning"}>
+                  {Object.keys(importedAttendance).length > 0 ? `Đã có (${Object.keys(importedAttendance).length} SV)` : "Chưa có"}
+                </Badge>
+              </div>
+            </div>
+            {(matchedTranscriptCount < scopedStudents.length || Object.keys(importedAttendance).length === 0) && (
+              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 text-xs rounded-lg p-3 space-y-2">
+                <p className="font-semibold">⚠️ Thiếu dữ liệu điểm danh lớp học hoặc học lực!</p>
+                <p>Bạn cần import thêm dữ liệu để có thể chuyển sang bước tiếp theo.</p>
+                <div className="flex gap-2 pt-1">
+                  <a href="/academic-transcript-import" target="_blank" className="underline font-bold text-primary hover:text-primary-glow">Import học lực</a>
+                  <span>·</span>
+                  <button onClick={() => setStep(2)} className="underline font-bold text-primary hover:text-primary-glow">Import điểm danh ở Bước 3</button>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -611,61 +718,117 @@ export default function EvaluationSession() {
 
   const renderAttendance = () => (
     <Card>
-      <CardHeader className="flex-row items-start justify-between">
-        <div><CardTitle className="text-lg">Dữ liệu điểm danh hoạt động</CardTitle><CardDescription>Hệ thống đối chiếu người tham gia đã xác nhận với phạm vi sinh viên.</CardDescription></div>
-        <Badge className="bg-success/15 text-success hover:bg-success/15">{matchedAttendance} lượt hợp lệ</Badge>
+      <CardHeader className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div>
+          <CardTitle className="text-lg">Dữ liệu điểm danh lớp học</CardTitle>
+          <CardDescription>Bảng thống kê số buổi đi học (số buổi có mặt) và số buổi vắng học của sinh viên trong kỳ học.</CardDescription>
+        </div>
+        <div className="flex items-center gap-3">
+          <Label htmlFor="attendance-csv" className="cursor-pointer bg-primary text-primary-foreground px-3 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 flex items-center gap-1.5 shadow-sm">
+            <UploadCloud className="h-4 w-4" /> Import Điểm danh Lớp học (CSV)
+          </Label>
+          <input
+            type="file"
+            id="attendance-csv"
+            accept=".csv"
+            className="hidden"
+            onChange={handleImportAttendance}
+          />
+          <Badge className="bg-success/15 text-success hover:bg-success/15">
+            {Object.keys(importedAttendance).length > 0 ? "Đã nhập file" : "Chờ nhập dữ liệu"}
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader><TableRow><TableHead>Hoạt động</TableHead><TableHead>Tiêu chí</TableHead><TableHead>Điểm</TableHead><TableHead>Đã điểm danh</TableHead><TableHead>Trạng thái</TableHead></TableRow></TableHeader>
-          <TableBody>
-            {activities.map((activity) => {
-              const studentIds = new Set(scopedStudents.map((item) => item.student_id));
-              const attended = (activity.participants || []).filter((item) => studentIds.has(item.student_id) && item.status === "attended").length;
-              return <TableRow key={activity.id}><TableCell className="font-medium">{activity.title}</TableCell><TableCell>{criteria.find((item) => item.id === activity.criterion)?.code || "-"}</TableCell><TableCell>+{activity.points}</TableCell><TableCell>{attended}</TableCell><TableCell><Badge variant="outline" className={attended ? "border-success/20 bg-success/10 text-success" : ""}>{attended ? "Sẵn sàng" : "Không có dữ liệu"}</Badge></TableCell></TableRow>;
-            })}
-            {!activities.length && <TableRow><TableCell colSpan={5} className="h-28 text-center text-muted-foreground">Chưa có hoạt động để đối chiếu.</TableCell></TableRow>}
-          </TableBody>
-        </Table>
+        <div className="max-h-[340px] overflow-y-auto rounded-xl border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mã SV</TableHead>
+                <TableHead>Họ tên</TableHead>
+                <TableHead>Lớp</TableHead>
+                <TableHead className="text-center">Số buổi đi học</TableHead>
+                <TableHead className="text-center">Số buổi vắng học</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {scopedStudents.map((student) => {
+                const custom = importedAttendance[student.student_id];
+                const attended = custom ? custom.attended : 0;
+                const absent = custom ? custom.absent : 0;
+                return (
+                  <TableRow key={student.id}>
+                    <TableCell className="font-mono">{student.student_id}</TableCell>
+                    <TableCell className="font-medium">{student.full_name}</TableCell>
+                    <TableCell>{student.class_name}</TableCell>
+                    <TableCell className="text-center font-bold text-success">{attended}</TableCell>
+                    <TableCell className="text-center font-bold text-destructive">{absent}</TableCell>
+                  </TableRow>
+                );
+              })}
+              {!scopedStudents.length && <TableRow><TableCell colSpan={5} className="h-28 text-center text-muted-foreground">Chưa có sinh viên để đối chiếu.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   );
 
-  const renderAcademic = () => {
-    const transcriptMap = new Map(transcripts.map((item) => [item.student_code, item]));
-    return (
-      <Card>
-        <CardHeader className="flex-row items-start justify-between">
-          <div><CardTitle className="text-lg">Dữ liệu xếp loại học lực</CardTitle><CardDescription>Đối chiếu bảng điểm đã nhập cho {semester} · {year}.</CardDescription></div>
-          <Button variant="outline" size="sm" onClick={loadTranscriptData} disabled={transcriptLoading}>
-            <RefreshCw className={cn("mr-2 h-4 w-4", transcriptLoading && "animate-spin")} />
-            {transcriptLoading ? "Đang tải..." : "Kiểm tra lại"}
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {transcriptNotice && (
-            <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-sm text-amber-700">
-              {transcriptNotice}
-            </div>
-          )}
-          <div className="mb-5 grid gap-3 sm:grid-cols-3">
-            <Stat label="Trong phạm vi" value={scopedStudents.length} />
-            <Stat label="Đã có học lực" value={matchedTranscriptCount} tone="success" />
-            <Stat label="Thiếu dữ liệu" value={scopedStudents.length - matchedTranscriptCount} tone="warning" />
-          </div>
-          <div className="max-h-[340px] overflow-y-auto rounded-xl border">
-            <Table>
-              <TableHeader><TableRow><TableHead>Mã SV</TableHead><TableHead>Họ tên</TableHead><TableHead>Lớp</TableHead><TableHead>GPA</TableHead><TableHead>Xếp loại</TableHead></TableRow></TableHeader>
-              <TableBody>{scopedStudents.slice(0, 100).map((student) => {
-                const record = transcriptMap.get(student.student_id);
-                return <TableRow key={student.id}><TableCell>{student.student_id}</TableCell><TableCell className="font-medium">{student.full_name}</TableCell><TableCell>{student.class_name}</TableCell><TableCell>{record?.gpa ?? "-"}</TableCell><TableCell><Badge variant="outline" className={record ? "border-success/20 bg-success/10 text-success" : "text-muted-foreground"}>{record?.classification || "Chưa có dữ liệu"}</Badge></TableCell></TableRow>;
-              })}</TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
+  const renderStudentActivities = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Danh sách hoạt động tham gia của sinh viên</CardTitle>
+        <CardDescription>Các hoạt động mà sinh viên đã tham gia trong học kỳ.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="max-h-[440px] overflow-auto rounded-xl border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mã SV</TableHead>
+                <TableHead>Họ tên</TableHead>
+                <TableHead>Lớp</TableHead>
+                <TableHead>Các hoạt động đã tham gia</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {scopedStudents.map((student) => {
+                const attendedActivities = activities.filter(a =>
+                  (a.participants || []).some(p => p.student_id === student.student_id && p.status === "attended")
+                );
+                const custom = importedAttendance[student.student_id];
+                return (
+                  <TableRow key={student.id}>
+                    <TableCell className="font-mono">{student.student_id}</TableCell>
+                    <TableCell className="font-medium">{student.full_name}</TableCell>
+                    <TableCell>{student.class_name}</TableCell>
+                    <TableCell>
+                      {custom ? (
+                        <div className="text-sm font-semibold text-blue-600">
+                          Đã tham gia {custom.attended} hoạt động (dữ liệu imported)
+                        </div>
+                      ) : attendedActivities.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {attendedActivities.map((act) => (
+                            <Badge key={act.id} variant="secondary" className="text-[10px] bg-primary/5 text-primary border-primary/20">
+                              {act.title}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Chưa tham gia hoạt động nào</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {!scopedStudents.length && <TableRow><TableCell colSpan={4} className="h-28 text-center text-muted-foreground">Chưa có sinh viên để đối chiếu.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
   const renderCalculation = () => (
     <Card className="overflow-hidden">
@@ -786,9 +949,9 @@ export default function EvaluationSession() {
     </Card>
   );
 
-  const contents = [renderScope, renderCriteria, renderAttendance, renderAcademic, renderCalculation, renderReview, renderSave];
+  const contents = [renderScope, renderCriteria, renderAttendance, renderStudentActivities, renderCalculation, renderReview, renderSave];
 
-  if (loading) return <div className="flex min-h-[450px] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  if (loading) return <Loading message="Đang tải dữ liệu phiên đánh giá..." />;
 
   return (
     <div className="mx-auto w-full max-w-[1440px] space-y-6">
@@ -850,7 +1013,7 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
 }
 
 function ClassificationBadge({ value }: { value: string }) {
-  const style = value === "Xuất sắc" || value === "Tốt"
+  const style = value === "Xuất sắc" || value === "Giỏi"
     ? "border-success/20 bg-success/10 text-success"
     : value === "Khá" || value === "Trung bình"
       ? "border-primary/20 bg-primary/10 text-primary"
