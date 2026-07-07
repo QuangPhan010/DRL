@@ -9,6 +9,11 @@ from .views import (
     NotificationViewSet
 )
 from .transcript_views import TranscriptImportViewSet
+from .evaluation_session_views import (
+    start_evaluation_session,
+    get_evaluation_session,
+    heartbeat_evaluation_session,
+)
 
 router = DefaultRouter()
 router.register(r'classes', ClassInfoViewSet, basename='class')
@@ -36,6 +41,9 @@ router.register(r'notifications', NotificationViewSet, basename='notification')
 urlpatterns = [
     path('login/', login_view, name='login'),
     path('change-password/', change_password_view, name='change-password'),
+    path('evaluations/session/start/', start_evaluation_session, name='evaluation-session-start'),
+    path('evaluations/session/<int:pk>/', get_evaluation_session, name='evaluation-session-detail'),
+    path('evaluations/session/<int:pk>/heartbeat/', heartbeat_evaluation_session, name='evaluation-session-heartbeat'),
     path('', include(router.urls)),
 ]
 

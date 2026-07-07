@@ -28,6 +28,22 @@ import { toast } from "sonner";
 import Loading from "./Loading";
 import ErrorPage from "./ErrorPage";
 
+type EvaluationSessionRecord = {
+  id: number;
+  semester: string;
+  year?: string | null;
+  status: string;
+  started_at: string;
+  last_active: string;
+  evaluation?: number | null;
+  student?: number | null;
+  student_id?: string | null;
+  student_name?: string | null;
+  evaluation_status?: string | null;
+  evaluation_total_score?: number | null;
+  created?: boolean;
+};
+
 export default function MyScores() {
   const { user } = useAuth();
   const [evals, setEvals] = useState<any[]>([]);
@@ -38,6 +54,8 @@ export default function MyScores() {
   const [selfNote, setSelfNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [selectedEvalId, setSelectedEvalId] = useState<number | null>(null);
+  const [evaluationSession, setEvaluationSession] = useState<EvaluationSessionRecord | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(false);
 
   const fetchMyScores = async () => {
     try {
@@ -70,6 +88,35 @@ export default function MyScores() {
           if (sorted.length > 0) {
             setSelectedEvalId(sorted[sorted.length - 1].id);
           }
+
+          const activeEval = [...sorted].reverse().find((item: any) => item.status === "draft" || item.status === "rejected")
+            || sorted[sorted.length - 1];
+          if (activeEval) {
+            try {
+              setSessionLoading(true);
+              const sessionRes = await fetch(`${API_URL}/evaluations/session/start/`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...headers,
+                },
+                body: JSON.stringify({
+                  evaluationId: activeEval.id,
+                  studentId: user.studentId,
+                  semester: activeEval.semester,
+                  year: activeEval.year,
+                }),
+              });
+              if (sessionRes.ok) {
+                const sessionData = await sessionRes.json();
+                setEvaluationSession(sessionData);
+              }
+            } catch (sessionError) {
+              console.error(sessionError);
+            } finally {
+              setSessionLoading(false);
+            }
+          }
         }
       }
       setError(false);
@@ -85,6 +132,29 @@ export default function MyScores() {
   useEffect(() => {
     fetchMyScores();
   }, [user]);
+
+  useEffect(() => {
+    if (!evaluationSession?.id) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const token = localStorage.getItem("drl_token");
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const response = await fetch(`${API_URL}/evaluations/session/${evaluationSession.id}/heartbeat/`, {
+          method: "PATCH",
+          headers,
+        });
+        if (response.ok) {
+          const nextSession = await response.json();
+          setEvaluationSession(nextSession);
+        }
+      } catch (heartbeatError) {
+        console.error(heartbeatError);
+      }
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [evaluationSession?.id]);
 
   const latest = evals[evals.length - 1];
   const editableEval = [...evals].reverse().find(e => e.status === "draft" || e.status === "rejected");
@@ -106,6 +176,9 @@ export default function MyScores() {
   const excessPoints = (evaluation: any) => Number(evaluation?.points_excess || 0);
   const completedSemesters = evals.filter(e => missingPoints(e) === 0).length;
   const totalMissingPoints = evals.reduce((sum, e) => sum + missingPoints(e), 0);
+  const sessionLastActiveLabel = evaluationSession?.last_active
+    ? new Date(evaluationSession.last_active).toLocaleString("vi-VN")
+    : "";
 
   const chartData = evals.map(e => ({ 
     name: `${e.semester} ${e.year.substring(2, 4)}`, 
@@ -195,13 +268,36 @@ export default function MyScores() {
             Bảng điều khiển học tập, theo dõi điểm rèn luyện và tiến trình phát triển cá nhân.
           </p>
         </div>
-        {editableEval && (
+        {(editableEval || evaluationSession) && (
           <Badge className="bg-amber-500/10 text-amber-600 hover:bg-amber-500/15 border-amber-500/20 px-3 py-1.5 rounded-full flex items-center gap-1.5 animate-pulse text-xs font-semibold">
             <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-            Có đợt tự đánh giá mới đang mở!
+            {sessionLoading
+              ? "Đang khởi tạo phiên đánh giá..."
+              : evaluationSession?.id
+                ? `Phiên #${evaluationSession.id} đang ${evaluationSession.status === "active" ? "hoạt động" : "mở"}`
+                : "Có đợt tự đánh giá mới đang mở!"}
           </Badge>
         )}
       </div>
+      {evaluationSession && (
+        <Card className="border border-primary/15 bg-primary/5">
+          <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">Phiên đánh giá</p>
+              <p className="text-xs text-muted-foreground">
+                {evaluationSession.student_name || user?.fullName || user?.studentId || "Sinh viên"}
+                {" · "}
+                {evaluationSession.semester}
+                {evaluationSession.year ? ` · ${evaluationSession.year}` : ""}
+              </p>
+            </div>
+            <div className="text-xs text-muted-foreground sm:text-right">
+              <p>Trạng thái: {evaluationSession.status}</p>
+              <p>Lần hoạt động cuối: {sessionLastActiveLabel || "đang cập nhật..."}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Dashboard */}
       {latest ? (

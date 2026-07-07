@@ -61,6 +61,18 @@ type ScoreRow = Student & {
   classification: string;
 };
 
+type EvaluationSessionRecord = {
+  id: number;
+  semester: string;
+  year?: string | null;
+  status: string;
+  started_at: string;
+  last_active: string;
+  evaluation?: number | null;
+  student?: number | null;
+  created?: boolean;
+};
+
 const steps = [
   { title: "Phạm vi sinh viên", short: "Phạm vi", icon: Users },
   { title: "Chọn bộ tiêu chí", short: "Tiêu chí", icon: BookOpenCheck },
@@ -139,6 +151,8 @@ export default function EvaluationSession() {
   const [scores, setScores] = useState<ScoreRow[]>([]);
   const [savedCount, setSavedCount] = useState(0);
   const [importedAttendance, setImportedAttendance] = useState<Record<string, { attended: number; absent: number }>>({});
+  const [evaluationSession, setEvaluationSession] = useState<EvaluationSessionRecord | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(false);
 
   useEffect(() => {
     const loadBaseData = async () => {
@@ -190,6 +204,39 @@ export default function EvaluationSession() {
     };
     loadBaseData();
   }, []);
+
+  useEffect(() => {
+    if (loading || !semester || !year) return;
+
+    const startWorkspaceSession = async () => {
+      try {
+        setSessionLoading(true);
+        const token = localStorage.getItem("drl_token");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+        const response = await fetch(`${API_URL}/evaluations/session/start/`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            semester,
+            year,
+          }),
+        });
+        if (response.ok) {
+          const sessionData = await response.json();
+          setEvaluationSession(sessionData);
+        }
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setSessionLoading(false);
+      }
+    };
+
+    startWorkspaceSession();
+  }, [loading, semester, year, criteriaSetId]);
 
   useEffect(() => {
     if (!criteriaSetId) return;
@@ -248,6 +295,9 @@ export default function EvaluationSession() {
   const averageCalculatedScore = scores.length
     ? Math.round(scores.reduce((sum, item) => sum + item.total, 0) / scores.length)
     : 0;
+  const sessionLastActiveLabel = evaluationSession?.last_active
+    ? new Date(evaluationSession.last_active).toLocaleString("vi-VN")
+    : "";
 
   const toggleClass = (className: string, checked: boolean) => {
     setSelectedClasses((current) => checked ? [...new Set([...current, className])] : current.filter((item) => item !== className));
@@ -334,6 +384,29 @@ export default function EvaluationSession() {
   useEffect(() => {
     if (step === 3 || step === 0) loadTranscriptData();
   }, [step, semester, year]);
+
+  useEffect(() => {
+    if (!evaluationSession?.id) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const token = localStorage.getItem("drl_token");
+        const headers: Record<string, string> = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+        const response = await fetch(`${API_URL}/evaluations/session/${evaluationSession.id}/heartbeat/`, {
+          method: "PATCH",
+          headers,
+        });
+        if (response.ok) {
+          const nextSession = await response.json();
+          setEvaluationSession(nextSession);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [evaluationSession?.id]);
 
   const calculateScores = () => {
     setCalculating(true);
@@ -960,6 +1033,24 @@ export default function EvaluationSession() {
         <h1 className="mt-2 text-3xl font-bold">Tạo phiên điểm rèn luyện</h1>
         <p className="mt-1 text-muted-foreground">Thiết lập phạm vi, kiểm tra dữ liệu và khởi tạo điểm theo từng bước.</p>
       </div>
+
+      {evaluationSession && (
+        <Card className="border border-primary/15 bg-primary/5">
+          <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">Phiên workspace</p>
+              <p className="text-xs text-muted-foreground">
+                {evaluationSession.semester}
+                {evaluationSession.year ? ` · ${evaluationSession.year}` : ""}
+              </p>
+            </div>
+            <div className="text-xs text-muted-foreground sm:text-right">
+              <p>Trạng thái: {evaluationSession.status}</p>
+              <p>Lần hoạt động cuối: {sessionLastActiveLabel || "đang cập nhật..."}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-0 shadow-sm">
         <CardContent className="p-3 sm:p-5">

@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractUser, UserManager
+from django.utils import timezone
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -233,6 +234,46 @@ class Evaluation(models.Model):
 
     def __str__(self):
         return f"DRL {self.student.student_id} - {self.semester} {self.year}"
+
+class EvaluationSession(models.Model):
+    STATUS_CHOICES = (
+        ('active', 'Active'),
+        ('paused', 'Paused'),
+        ('completed', 'Completed'),
+        ('expired', 'Expired'),
+    )
+
+    evaluation = models.ForeignKey(
+        Evaluation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sessions',
+    )
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='evaluation_sessions',
+    )
+    semester = models.CharField(max_length=20)
+    year = models.CharField(max_length=20, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    started_at = models.DateTimeField(default=timezone.now)
+    last_active = models.DateTimeField(default=timezone.now)
+    device_info = models.TextField(blank=True, default='')
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'evaluation_session'
+        ordering = ('-last_active', '-created_at')
+
+    def __str__(self):
+        target = self.student.student_id if self.student_id else f"{self.semester} {self.year or ''}".strip()
+        return f"Evaluation session #{self.pk} - {target}"
 
 class EvaluationDetail(models.Model):
     evaluation = models.ForeignKey(Evaluation, on_delete=models.CASCADE, related_name='details')
