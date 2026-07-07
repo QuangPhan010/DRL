@@ -45,7 +45,7 @@ const App = () => (
               <Route path="/error" element={<ErrorPage />} />
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Dashboard />} />
-                <Route path="/students" element={<Students />} />
+                <Route path="/students" element={<Classes />} />
                 <Route path="/classes" element={<Classes />} />
                 <Route path="/approvals" element={<Approvals />} />
                 <Route path="/my-scores" element={<MyScores />} />

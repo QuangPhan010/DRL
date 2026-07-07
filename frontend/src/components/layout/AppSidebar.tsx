@@ -15,18 +15,28 @@ import { cn } from "@/lib/utils";
 interface NavItem { title: string; url: string; icon: any; roles: Role[]; }
 
 const navItems: NavItem[] = [
+  // 1. Tổng quan & Cá nhân
   { title: "Tổng quan", url: "/", icon: LayoutDashboard, roles: ["admin", "advisor", "student", "organizer", "class_monitor", "student_affairs", "academic_affairs"] },
   { title: "Điểm của tôi", url: "/my-scores", icon: UserIcon, roles: ["student"] },
-  { title: "Quản lý hoạt động", url: "/activities", icon: CalendarDays, roles: ["student", "organizer", "class_monitor", "advisor", "student_affairs", "admin"] },
-  { title: "Đơn vị tổ chức", url: "/organizations", icon: Building2, roles: ["admin", "student_affairs", "organizer"] },
-  { title: "Quản lý lớp học", url: "/classes", icon: GraduationCap, roles: ["admin", "advisor", "student_affairs", "academic_affairs"] },
+
+  // 2. Tiêu chí & Phiên đánh giá (Cấu hình đợt đánh giá)
+  { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin", "student_affairs", "student", "class_monitor", "advisor", "organizer", "academic_affairs"] },
+  { title: "Tạo phiên đánh giá", url: "/evaluation-sessions/create", icon: ListChecks, roles: ["student_affairs", "admin"] },
+
+  // 3. Xét duyệt & Rà soát (Workflow duyệt điểm)
   { title: "Rà soát lớp", url: "/class-review", icon: ClipboardCheck, roles: ["class_monitor"] },
   { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "student_affairs", "admin"] },
-  { title: "Tạo phiên đánh giá", url: "/evaluation-sessions/create", icon: ListChecks, roles: ["student_affairs", "admin"] },
+
+  // 4. Quản lý hoạt động & Tổ chức
+  { title: "Quản lý hoạt động", url: "/activities", icon: CalendarDays, roles: ["student", "organizer", "class_monitor", "advisor", "student_affairs", "admin"] },
+  { title: "Đơn vị tổ chức", url: "/organizations", icon: Building2, roles: ["admin", "student_affairs", "organizer"] },
+
+  // 5. Nhập & Đồng bộ điểm học tập (Dữ liệu học lực)
   { title: "Đồng bộ điểm học tập", url: "/data-sync", icon: RefreshCw, roles: ["academic_affairs", "admin"] },
   { title: "Nhập bảng điểm PDF", url: "/academic-transcript-import", icon: FileUp, roles: ["academic_affairs", "admin"] },
-  { title: "Quản lý sinh viên", url: "/students", icon: Users, roles: ["admin", "advisor", "student_affairs", "class_monitor"] },
-  { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin", "student_affairs", "student", "class_monitor", "advisor", "organizer", "academic_affairs"] },
+
+  // 6. Quản lý lớp, sinh viên & cấu hình hệ thống
+  { title: "Quản lý lớp & SV", url: "/classes", icon: GraduationCap, roles: ["admin", "advisor", "student_affairs", "academic_affairs"] },
   { title: "Cấu hình hệ thống", url: "/settings", icon: Settings, roles: ["admin"] },
 ];
 

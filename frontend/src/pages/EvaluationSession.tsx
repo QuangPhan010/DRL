@@ -562,9 +562,9 @@ export default function EvaluationSession() {
       setSaving(true);
       setSavedCount(0);
       let completed = 0;
-      // SQLite only permits one writer at a time. Keep these requests strictly
-      // sequential and retry transient server/database lock errors.
-      for (const row of scores) {
+      const batchSize = 10;
+
+      const saveRow = async (row: any) => {
         const detailScores: Record<string, number> = {};
         criteria.forEach((criterion) => {
           const isAcademic = normalizeSearch(criterion.name).includes("hoc luc") || normalizeSearch(criterion.name).includes("hoc tap");
@@ -625,7 +625,14 @@ export default function EvaluationSession() {
         }
         completed += 1;
         setSavedCount(completed);
+      };
+
+      // Process in parallel batches of 10
+      for (let i = 0; i < scores.length; i += batchSize) {
+        const batch = scores.slice(i, i + batchSize);
+        await Promise.all(batch.map((row) => saveRow(row)));
       }
+
       toast.success(`Đã lưu phiên và tạo ${completed} phiếu đánh giá nháp`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Lưu phiên không thành công");
@@ -650,7 +657,7 @@ export default function EvaluationSession() {
                 <SelectContent>
                   <SelectItem value="HK1">Học kỳ 1</SelectItem>
                   <SelectItem value="HK2">Học kỳ 2</SelectItem>
-                  <SelectItem value="HK3">Học kỳ hè</SelectItem>
+                  <SelectItem value="HK3">Học kỳ 3</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -548,119 +548,132 @@ class StudentViewSet(viewsets.ModelViewSet):
         import random
         try:
             wb = openpyxl.load_workbook(file_obj, read_only=True)
-            sheet = wb.active
-            
             students_created = 0
-            first_row = True
-            header_map = {}
-            for row in sheet.iter_rows(values_only=True):
-                if first_row:
-                    first_row = False
-                    for idx, cell in enumerate(row):
-                        if cell:
-                            header_map[str(cell).strip().lower()] = idx
-                    
-                    # Validate headers
-                    required_id_terms = ['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien', 'mssv', 'mã số sinh viên', 'ma so sinh vien']
-                    required_name_terms = ['họ và tên', 'ho va ten', 'full name', 'fullname', 'tên', 'ten', 'họ tên', 'ho ten']
-                    
-                    has_id = any(term in header_map for term in required_id_terms)
-                    has_name = any(term in header_map for term in required_name_terms)
-                    
-                    if not (has_id and has_name):
-                        return Response({
-                            'error': f"Không tìm thấy cột bắt buộc 'Mã SV' hoặc 'Họ và tên'. Vui lòng kiểm tra lại dòng tiêu đề cột. Tiêu đề hiện tại trong file: {list(header_map.keys())}"
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                    continue
+            processed_sheets = 0
+            
+            for sheet_name in wb.sheetnames:
+                sheet = wb[sheet_name]
+                first_row = True
+                header_map = {}
                 
-                # Skip completely empty rows
-                if not any(row):
-                    continue
-
-                def get_val(names):
-                    for name in names:
-                        if name in header_map:
-                            idx = header_map[name]
-                            if idx < len(row):
-                                val = row[idx]
-                                return str(val).strip() if val is not None else ''
-                    return ''
-
-                student_id = get_val(['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien', 'mssv', 'mã số sinh viên', 'ma so sinh vien'])
-                full_name = get_val(['họ và tên', 'ho va ten', 'full name', 'fullname', 'tên', 'ten', 'họ tên', 'ho ten'])
-                email = get_val(['email', 'thư điện tử', 'thu dien tu', 'hòm thư', 'hom thu'])
-                class_name = get_val(['lớp', 'lop', 'class', 'class name', 'class_name', 'lớp sinh hoạt', 'lop sinh hoat'])
-                faculty = get_val(['khoa', 'faculty', 'khoa đào tạo', 'khoa dao tao']) or 'Công nghệ Thông tin'
-                cohort = get_val(['khóa', 'khoa', 'cohort', 'niên khóa', 'nien khoa', 'niên khoá']) or 'K20'
-                gender = get_val(['giới tính', 'gioi tinh', 'gender', 'phái', 'phai']) or 'Nam'
-                phone = get_val(['số điện thoại', 'so dien thoai', 'phone', 'sđt', 'sdt', 'điện thoại', 'dien thoai'])
-
-                if not student_id or not full_name:
-                    continue
-
-                # Auto-generate fallback email if missing
-                if not email:
-                    email = f"{student_id.lower()}@stu.itc.edu.vn"
-
-                # Find or create class
-                from .models import ClassInfo
-                class_obj = None
-                if class_name:
-                    class_obj, _ = ClassInfo.objects.get_or_create(
-                        name=class_name,
-                        defaults={'faculty': faculty, 'cohort': cohort}
-                    )
-
-                student_obj = Student.objects.filter(student_id=student_id).first()
-                if not student_obj:
-                    user_obj = User.objects.filter(student_id=student_id).first()
-                    if not user_obj:
-                        user_obj = User.objects.filter(username__iexact=student_id).first()
+                # Check and parse sheet
+                sheet_valid = True
+                for row in sheet.iter_rows(values_only=True):
+                    if first_row:
+                        first_row = False
+                        for idx, cell in enumerate(row):
+                            if cell:
+                                header_map[str(cell).strip().lower()] = idx
+                        
+                        # Validate headers
+                        required_id_terms = ['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien', 'mssv', 'mã số sinh viên', 'ma so sinh vien']
+                        required_name_terms = ['họ và tên', 'ho va ten', 'full name', 'fullname', 'tên', 'ten', 'họ tên', 'ho ten']
+                        
+                        has_id = any(term in header_map for term in required_id_terms)
+                        has_name = any(term in header_map for term in required_name_terms)
+                        
+                        if not (has_id and has_name):
+                            sheet_valid = False
+                            break
+                        processed_sheets += 1
+                        continue
                     
-                    if not user_obj:
-                        username = student_id.lower()
-                        random_password = generate_random_password()
-                        user_obj = User.objects.create_user(
-                            username=username,
-                            email=email,
-                            password=random_password,
-                            role='student',
-                            full_name=full_name,
-                            student_id=student_id,
-                            is_first_login=True,
-                            plain_password=random_password
+                    if not sheet_valid:
+                        break
+
+                    # Skip completely empty rows
+                    if not any(row):
+                        continue
+
+                    def get_val(names):
+                        for name in names:
+                            if name in header_map:
+                                idx = header_map[name]
+                                if idx < len(row):
+                                    val = row[idx]
+                                    return str(val).strip() if val is not None else ''
+                        return ''
+
+                    student_id = get_val(['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien', 'mssv', 'mã số sinh viên', 'ma so sinh vien'])
+                    full_name = get_val(['họ và tên', 'ho va ten', 'full name', 'fullname', 'tên', 'ten', 'họ tên', 'ho ten'])
+                    email = get_val(['email', 'thư điện tử', 'thu dien tu', 'hòm thư', 'hom thu'])
+                    class_name = get_val(['lớp', 'lop', 'class', 'class name', 'class_name', 'lớp sinh hoạt', 'lop sinh hoat'])
+                    faculty = get_val(['khoa', 'faculty', 'khoa đào tạo', 'khoa dao tao']) or 'Công nghệ Thông tin'
+                    cohort = get_val(['khóa', 'khoa', 'cohort', 'niên khóa', 'nien khoa', 'niên khoá']) or 'K20'
+                    gender = get_val(['giới tính', 'gioi tinh', 'gender', 'phái', 'phai']) or 'Nam'
+                    phone = get_val(['số điện thoại', 'so dien thoai', 'phone', 'sđt', 'sdt', 'điện thoại', 'dien thoai'])
+
+                    if not student_id or not full_name:
+                        continue
+
+                    # Auto-generate fallback email if missing
+                    if not email:
+                        email = f"{student_id.lower()}@stu.itc.edu.vn"
+
+                    # Find or create class
+                    from .models import ClassInfo
+                    class_obj = None
+                    if class_name:
+                        class_obj, _ = ClassInfo.objects.get_or_create(
+                            name=class_name,
+                            defaults={'faculty': faculty, 'cohort': cohort}
                         )
+
+                    student_obj = Student.objects.filter(student_id=student_id).first()
+                    if not student_obj:
+                        user_obj = User.objects.filter(student_id=student_id).first()
+                        if not user_obj:
+                            user_obj = User.objects.filter(username__iexact=student_id).first()
+                        
+                        if not user_obj:
+                            username = student_id.lower()
+                            random_password = generate_random_password()
+                            user_obj = User.objects.create_user(
+                                username=username,
+                                email=email,
+                                password=random_password,
+                                role='student',
+                                full_name=full_name,
+                                student_id=student_id,
+                                is_first_login=True,
+                                plain_password=random_password
+                            )
+                        else:
+                            # Update student_id on existing User if missing
+                            if not user_obj.student_id:
+                                user_obj.student_id = student_id
+                                user_obj.save()
+
+                        Student.objects.create(
+                            user=user_obj,
+                            student_id=student_id,
+                            full_name=full_name,
+                            email=email,
+                            class_info=class_obj,
+                            faculty=faculty,
+                            cohort=cohort,
+                            gender=gender,
+                            phone=phone
+                        )
+                        students_created += 1
                     else:
-                        # Update student_id on existing User if missing
-                        if not user_obj.student_id:
-                            user_obj.student_id = student_id
-                            user_obj.save()
+                        student_obj.full_name = full_name
+                        student_obj.email = email
+                        if class_obj:
+                            student_obj.class_info = class_obj
+                        student_obj.faculty = faculty
+                        student_obj.cohort = cohort
+                        student_obj.gender = gender
+                        if phone:
+                            student_obj.phone = phone
+                        student_obj.save()
 
-                    Student.objects.create(
-                        user=user_obj,
-                        student_id=student_id,
-                        full_name=full_name,
-                        email=email,
-                        class_info=class_obj,
-                        faculty=faculty,
-                        cohort=cohort,
-                        gender=gender,
-                        phone=phone
-                    )
-                    students_created += 1
-                else:
-                    student_obj.full_name = full_name
-                    student_obj.email = email
-                    if class_obj:
-                        student_obj.class_info = class_obj
-                    student_obj.faculty = faculty
-                    student_obj.cohort = cohort
-                    student_obj.gender = gender
-                    if phone:
-                        student_obj.phone = phone
-                    student_obj.save()
+            if processed_sheets == 0:
+                return Response({
+                    'error': "Không tìm thấy bất kỳ sheet nào có cấu trúc hợp lệ (chứa tiêu đề 'Mã SV' và 'Họ và tên'). Vui lòng kiểm tra lại file Excel."
+                }, status=status.HTTP_400_BAD_REQUEST)
 
-            return Response({'message': f'Nhập thành công danh sách sinh viên.', 'created_count': students_created})
+            return Response({'message': f'Nhập thành công danh sách sinh viên từ {processed_sheets} sheet.', 'created_count': students_created})
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -1214,84 +1227,94 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
-        student_id = request.data.get('studentId') or request.data.get('student_id')
-        student = get_object_or_404(Student, student_id=student_id)
-        semester = request.data.get('semester')
-        year = request.data.get('year')
-        scores_data = request.data.get('scores', {}) # dict of subitem_id -> score
-        note = request.data.get('note', '')
-        academic_gpa = request.data.get('academicGpa', request.data.get('academic_gpa'))
-        academic_classification = request.data.get(
-            'academicClassification',
-            request.data.get('academic_classification', '')
-        )
-        requested_raw_score = request.data.get('rawScore', request.data.get('raw_score'))
-        status_param = request.data.get('status', 'draft')
-        requested_set_id = request.data.get('criteriaSet') or request.data.get('criteria_set')
+        import time
+        from django.db import OperationalError
 
-        existing_evaluation = Evaluation.objects.filter(
-            student=student, semester=semester, year=year
-        ).first()
-        if existing_evaluation and existing_evaluation.criteria_set:
-            criteria_set = existing_evaluation.criteria_set
-        elif requested_set_id:
-            criteria_set = get_object_or_404(CriteriaSet, pk=requested_set_id)
-        else:
-            criteria_set = (
-                CriteriaSet.objects.filter(
-                    semester=semester, academic_year=year, is_active=True
-                ).first()
-                or CriteriaSet.objects.filter(is_active=True).first()
-            )
-        if not criteria_set:
-            return Response(
-                {'detail': 'Chưa có bộ tiêu chí nào được quản trị viên kích hoạt.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Create or update evaluation
-        evaluation, created = Evaluation.objects.update_or_create(
-            student=student, semester=semester, year=year,
-            defaults={
-                'note': note,
-                'academic_gpa': academic_gpa if academic_gpa not in ('', None) else None,
-                'academic_classification': academic_classification or '',
-                'status': status_param,
-                'class_confirmed': False,
-                'criteria_set': criteria_set,
-            }
-        )
-
-        # Clear old details
-        evaluation.details.all().delete()
-
-        # Write new details and calculate total score
-        total_score = 0
-        from .models import SubItem
-        for sub_item_id, score_val in scores_data.items():
+        for attempt in range(5):
             try:
-                sub_item = SubItem.objects.get(
-                    id=sub_item_id,
-                    group__criterion__criteria_set=criteria_set
-                )
-                EvaluationDetail.objects.create(
-                    evaluation=evaluation,
-                    sub_item=sub_item,
-                    score=score_val
-                )
-            except SubItem.DoesNotExist:
-                pass
+                with transaction.atomic():
+                    student_id = request.data.get('studentId') or request.data.get('student_id')
+                    student = get_object_or_404(Student, student_id=student_id)
+                    semester = request.data.get('semester')
+                    year = request.data.get('year')
+                    scores_data = request.data.get('scores', {}) # dict of subitem_id -> score
+                    note = request.data.get('note', '')
+                    academic_gpa = request.data.get('academicGpa', request.data.get('academic_gpa'))
+                    academic_classification = request.data.get(
+                        'academicClassification',
+                        request.data.get('academic_classification', '')
+                    )
+                    requested_raw_score = request.data.get('rawScore', request.data.get('raw_score'))
+                    status_param = request.data.get('status', 'draft')
+                    requested_set_id = request.data.get('criteriaSet') or request.data.get('criteria_set')
 
-        sync_evaluation_with_transcript(evaluation)
-        recalculate_evaluation_score(evaluation)
-        if requested_raw_score not in (None, ''):
-            requested_total = int(float(requested_raw_score))
-            if requested_total > evaluation.raw_score:
-                evaluation.raw_score = requested_total
-                evaluation.save(update_fields=('raw_score',))
-        rebalance_training_score(student)
-        evaluation.refresh_from_db()
-        return Response(EvaluationSerializer(evaluation).data, status=status.HTTP_201_CREATED)
+                    existing_evaluation = Evaluation.objects.filter(
+                        student=student, semester=semester, year=year
+                    ).first()
+                    if existing_evaluation and existing_evaluation.criteria_set:
+                        criteria_set = existing_evaluation.criteria_set
+                    elif requested_set_id:
+                        criteria_set = get_object_or_404(CriteriaSet, pk=requested_set_id)
+                    else:
+                        criteria_set = (
+                            CriteriaSet.objects.filter(
+                                semester=semester, academic_year=year, is_active=True
+                            ).first()
+                            or CriteriaSet.objects.filter(is_active=True).first()
+                        )
+                    if not criteria_set:
+                        return Response(
+                            {'detail': 'Chưa có bộ tiêu chí nào được quản trị viên kích hoạt.'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    # Create or update evaluation
+                    evaluation, created = Evaluation.objects.update_or_create(
+                        student=student, semester=semester, year=year,
+                        defaults={
+                            'note': note,
+                            'academic_gpa': academic_gpa if academic_gpa not in ('', None) else None,
+                            'academic_classification': academic_classification or '',
+                            'status': status_param,
+                            'class_confirmed': False,
+                            'criteria_set': criteria_set,
+                        }
+                    )
+
+                    # Clear old details
+                    evaluation.details.all().delete()
+
+                    # Write new details and calculate total score
+                    from .models import SubItem
+                    for sub_item_id, score_val in scores_data.items():
+                        try:
+                            sub_item = SubItem.objects.get(
+                                id=sub_item_id,
+                                group__criterion__criteria_set=criteria_set
+                            )
+                            EvaluationDetail.objects.create(
+                                evaluation=evaluation,
+                                sub_item=sub_item,
+                                score=score_val
+                            )
+                        except SubItem.DoesNotExist:
+                            pass
+
+                    sync_evaluation_with_transcript(evaluation)
+                    recalculate_evaluation_score(evaluation)
+                    if requested_raw_score not in (None, ''):
+                        requested_total = int(float(requested_raw_score))
+                        if requested_total > evaluation.raw_score:
+                            evaluation.raw_score = requested_total
+                            evaluation.save(update_fields=('raw_score',))
+                    rebalance_training_score(student)
+                    evaluation.refresh_from_db()
+                    return Response(EvaluationSerializer(evaluation).data, status=status.HTTP_201_CREATED)
+            except OperationalError as e:
+                if 'locked' in str(e).lower() and attempt < 4:
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                raise
 
     @action(detail=True, methods=['post'], url_path='submit-self-assessment')
     def submit_self_assessment(self, request, pk=None):
@@ -1363,6 +1386,73 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                         title="Phiếu tự đánh giá mới cần duyệt",
                         message=f"Sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) lớp {evaluation.student.class_info.name} đã nộp phiếu tự đánh giá HK{evaluation.semester} {evaluation.year}."
                     )
+
+        rebalance_training_score(evaluation.student)
+        evaluation.refresh_from_db()
+        return Response(EvaluationSerializer(evaluation).data)
+
+    @action(detail=True, methods=['post'], url_path='save-draft')
+    def save_draft(self, request, pk=None):
+        evaluation = self.get_object()
+        
+        # Case 4: Advisor Pending / non-draft non-rejected -> Không Auto Save
+        if evaluation.status not in ('draft', 'rejected'):
+            return Response(
+                {'error': 'Không thể tự động lưu khi phiếu đang trong trạng thái chờ duyệt hoặc đã duyệt.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Case 5: Session không hợp lệ -> 403
+        from .models import EvaluationSession
+        session_exists = EvaluationSession.objects.filter(
+            evaluation=evaluation, status='active'
+        ).exists() or EvaluationSession.objects.filter(
+            student=evaluation.student, semester=evaluation.semester, year=evaluation.year, status='active'
+        ).exists()
+        
+        if not session_exists:
+            return Response(
+                {'error': 'Phiếu đánh giá không có phiên hoạt động hợp lệ.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        if request.user.is_authenticated:
+            student = getattr(request.user, 'student_profile', None)
+            if student and student.pk != evaluation.student_id:
+                return Response(
+                    {'error': 'Bạn chỉ được lưu phiếu đánh giá của chính mình.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        scores_data = request.data.get('scores', {})
+        note = request.data.get('note', evaluation.note or '')
+        manual_subitems = SubItem.objects.filter(
+            group__criterion__criteria_set=evaluation.criteria_set,
+            group__criterion__is_manual=True,
+        )
+        manual_subitem_ids = set(manual_subitems.values_list('id', flat=True))
+
+        with transaction.atomic():
+            if manual_subitem_ids:
+                evaluation.details.filter(sub_item_id__in=manual_subitem_ids).delete()
+            for sub_item_id, score_val in scores_data.items():
+                try:
+                    sub_item_id_int = int(sub_item_id)
+                    if sub_item_id_int not in manual_subitem_ids:
+                        continue
+                    sub_item = manual_subitems.get(id=sub_item_id_int)
+                    score = int(float(score_val or 0))
+                except (ValueError, TypeError, SubItem.DoesNotExist):
+                    continue
+                EvaluationDetail.objects.update_or_create(
+                    evaluation=evaluation,
+                    sub_item=sub_item,
+                    defaults={'score': score},
+                )
+
+            evaluation.note = note
+            evaluation.save(update_fields=('note',))
+            recalculate_evaluation_score(evaluation)
 
         rebalance_training_score(evaluation.student)
         evaluation.refresh_from_db()

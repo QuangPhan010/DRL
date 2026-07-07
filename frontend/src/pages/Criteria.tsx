@@ -1045,7 +1045,7 @@ export default function Criteria() {
                   <SelectContent>
                     <SelectItem value="HK1">Học kỳ 1</SelectItem>
                     <SelectItem value="HK2">Học kỳ 2</SelectItem>
-                    <SelectItem value="HK3">Học kỳ hè</SelectItem>
+                    <SelectItem value="HK3">Học kỳ 3</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { 
   Award, 
   CheckCircle2, 
@@ -28,22 +28,6 @@ import { toast } from "sonner";
 import Loading from "./Loading";
 import ErrorPage from "./ErrorPage";
 
-type EvaluationSessionRecord = {
-  id: number;
-  semester: string;
-  year?: string | null;
-  status: string;
-  started_at: string;
-  last_active: string;
-  evaluation?: number | null;
-  student?: number | null;
-  student_id?: string | null;
-  student_name?: string | null;
-  evaluation_status?: string | null;
-  evaluation_total_score?: number | null;
-  created?: boolean;
-};
-
 export default function MyScores() {
   const { user } = useAuth();
   const [evals, setEvals] = useState<any[]>([]);
@@ -54,8 +38,6 @@ export default function MyScores() {
   const [selfNote, setSelfNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [selectedEvalId, setSelectedEvalId] = useState<number | null>(null);
-  const [evaluationSession, setEvaluationSession] = useState<EvaluationSessionRecord | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(false);
 
   const fetchMyScores = async () => {
     try {
@@ -88,35 +70,6 @@ export default function MyScores() {
           if (sorted.length > 0) {
             setSelectedEvalId(sorted[sorted.length - 1].id);
           }
-
-          const activeEval = [...sorted].reverse().find((item: any) => item.status === "draft" || item.status === "rejected")
-            || sorted[sorted.length - 1];
-          if (activeEval) {
-            try {
-              setSessionLoading(true);
-              const sessionRes = await fetch(`${API_URL}/evaluations/session/start/`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...headers,
-                },
-                body: JSON.stringify({
-                  evaluationId: activeEval.id,
-                  studentId: user.studentId,
-                  semester: activeEval.semester,
-                  year: activeEval.year,
-                }),
-              });
-              if (sessionRes.ok) {
-                const sessionData = await sessionRes.json();
-                setEvaluationSession(sessionData);
-              }
-            } catch (sessionError) {
-              console.error(sessionError);
-            } finally {
-              setSessionLoading(false);
-            }
-          }
         }
       }
       setError(false);
@@ -132,29 +85,6 @@ export default function MyScores() {
   useEffect(() => {
     fetchMyScores();
   }, [user]);
-
-  useEffect(() => {
-    if (!evaluationSession?.id) return;
-    const timer = window.setInterval(async () => {
-      try {
-        const token = localStorage.getItem("drl_token");
-        const headers: Record<string, string> = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        const response = await fetch(`${API_URL}/evaluations/session/${evaluationSession.id}/heartbeat/`, {
-          method: "PATCH",
-          headers,
-        });
-        if (response.ok) {
-          const nextSession = await response.json();
-          setEvaluationSession(nextSession);
-        }
-      } catch (heartbeatError) {
-        console.error(heartbeatError);
-      }
-    }, 60000);
-
-    return () => window.clearInterval(timer);
-  }, [evaluationSession?.id]);
 
   const latest = evals[evals.length - 1];
   const editableEval = [...evals].reverse().find(e => e.status === "draft" || e.status === "rejected");
@@ -176,9 +106,6 @@ export default function MyScores() {
   const excessPoints = (evaluation: any) => Number(evaluation?.points_excess || 0);
   const completedSemesters = evals.filter(e => missingPoints(e) === 0).length;
   const totalMissingPoints = evals.reduce((sum, e) => sum + missingPoints(e), 0);
-  const sessionLastActiveLabel = evaluationSession?.last_active
-    ? new Date(evaluationSession.last_active).toLocaleString("vi-VN")
-    : "";
 
   const chartData = evals.map(e => ({ 
     name: `${e.semester} ${e.year.substring(2, 4)}`, 
@@ -194,15 +121,114 @@ export default function MyScores() {
     return <Badge className="bg-rose-500/10 text-rose-500 hover:bg-rose-500/15 border-rose-500/20 gap-1.5 py-1 px-2.5 font-medium"><XCircle className="h-3.5 w-3.5" />Từ chối</Badge>;
   };
 
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error" | "offline">("idle");
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const isInitialLoad = useRef(true);
+  const queueRef = useRef<{ scores: Record<string, number>; note: string } | null>(null);
+
+  // Monitor network status
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (queueRef.current) {
+        triggerSave(queueRef.current.scores, queueRef.current.note);
+      }
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setSaveStatus("offline");
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  const triggerSave = async (scores: Record<string, number>, note: string, retries = 3, delay = 1000) => {
+    if (!editableEval) return;
+
+    if (editableEval.status !== "draft" && editableEval.status !== "rejected") {
+      return;
+    }
+
+    if (!navigator.onLine) {
+      queueRef.current = { scores, note };
+      setSaveStatus("offline");
+      return;
+    }
+
+    setSaveStatus("saving");
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_URL}/evaluations/${editableEval.id}/save-draft/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ scores, note }),
+      });
+
+      if (res.status === 403) {
+        setSaveStatus("error");
+        toast.error("Không có quyền lưu nháp (Phiên đánh giá không hợp lệ hoặc hết hạn).");
+        return;
+      }
+
+      if (res.status === 404) {
+        setSaveStatus("error");
+        toast.error("Không tìm thấy phiếu đánh giá.");
+        return;
+      }
+
+      if (!res.ok) throw new Error("API error");
+
+      queueRef.current = null;
+      setSaveStatus("saved");
+      
+      const data = await res.json();
+      setEvals(current => current.map(e => e.id === data.id ? { ...e, ...data } : e));
+    } catch (error) {
+      if (retries > 0 && navigator.onLine) {
+        setTimeout(() => {
+          triggerSave(scores, note, retries - 1, delay * 1.5);
+        }, delay);
+      } else {
+        setSaveStatus("error");
+        queueRef.current = { scores, note };
+        toast.error("Lỗi tự động lưu nháp. Hệ thống sẽ thử lại.");
+      }
+    }
+  };
+
   useEffect(() => {
     if (!editableEval) return;
     const nextScores: Record<string, number> = {};
     (editableEval.details || []).forEach((detail: any) => {
       nextScores[String(detail.sub_item_id)] = Number(detail.score || 0);
     });
+    isInitialLoad.current = true;
     setSelfScores(nextScores);
     setSelfNote(editableEval.note || "");
+    setSaveStatus("idle");
+    queueRef.current = null;
   }, [editableEval?.id]);
+
+  useEffect(() => {
+    if (isInitialLoad.current) {
+      isInitialLoad.current = false;
+      return;
+    }
+
+    setSaveStatus("saving");
+    const timer = setTimeout(() => {
+      triggerSave(selfScores, selfNote);
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [selfScores, selfNote]);
 
   const changeSelfScore = (subItemId: number, score: number) => {
     setSelfScores(current => ({
@@ -268,36 +294,13 @@ export default function MyScores() {
             Bảng điều khiển học tập, theo dõi điểm rèn luyện và tiến trình phát triển cá nhân.
           </p>
         </div>
-        {(editableEval || evaluationSession) && (
+        {editableEval && (
           <Badge className="bg-amber-500/10 text-amber-600 hover:bg-amber-500/15 border-amber-500/20 px-3 py-1.5 rounded-full flex items-center gap-1.5 animate-pulse text-xs font-semibold">
             <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-            {sessionLoading
-              ? "Đang khởi tạo phiên đánh giá..."
-              : evaluationSession?.id
-                ? `Phiên #${evaluationSession.id} đang ${evaluationSession.status === "active" ? "hoạt động" : "mở"}`
-                : "Có đợt tự đánh giá mới đang mở!"}
+            Có đợt tự đánh giá mới đang mở!
           </Badge>
         )}
       </div>
-      {evaluationSession && (
-        <Card className="border border-primary/15 bg-primary/5">
-          <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold">Phiên đánh giá</p>
-              <p className="text-xs text-muted-foreground">
-                {evaluationSession.student_name || user?.fullName || user?.studentId || "Sinh viên"}
-                {" · "}
-                {evaluationSession.semester}
-                {evaluationSession.year ? ` · ${evaluationSession.year}` : ""}
-              </p>
-            </div>
-            <div className="text-xs text-muted-foreground sm:text-right">
-              <p>Trạng thái: {evaluationSession.status}</p>
-              <p>Lần hoạt động cuối: {sessionLastActiveLabel || "đang cập nhật..."}</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Stats Dashboard */}
       {latest ? (
@@ -554,9 +557,31 @@ export default function MyScores() {
                 Phiếu của học kỳ <strong className="underline">{editableEval.semester} {editableEval.year}</strong> đang mở. Hãy tự đánh giá điểm và gửi.
               </p>
             </div>
-            <Badge className="bg-white/20 text-white hover:bg-white/30 border-0 py-1 px-3">
-              Trạng thái: {editableEval.status === "draft" ? "Nháp" : "Bị từ chối"}
-            </Badge>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+              {saveStatus === "saving" && (
+                <Badge className="bg-blue-500/20 text-blue-100 hover:bg-blue-500/30 border-0 py-1 px-3 gap-1">
+                  <Clock className="h-3.5 w-3.5 animate-spin" /> Đang tự động lưu...
+                </Badge>
+              )}
+              {saveStatus === "saved" && (
+                <Badge className="bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30 border-0 py-1 px-3 gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Đã tự động lưu nháp
+                </Badge>
+              )}
+              {saveStatus === "offline" && (
+                <Badge className="bg-gray-500/20 text-gray-200 hover:bg-gray-500/30 border-0 py-1 px-3 gap-1">
+                  <AlertCircle className="h-3.5 w-3.5" /> Ngoại tuyến (Chờ lưu)
+                </Badge>
+              )}
+              {saveStatus === "error" && (
+                <Badge className="bg-rose-500/20 text-rose-100 hover:bg-rose-500/30 border-0 py-1 px-3 gap-1">
+                  <XCircle className="h-3.5 w-3.5" /> Lỗi tự động lưu, sẽ thử lại
+                </Badge>
+              )}
+              <Badge className="bg-white/20 text-white hover:bg-white/30 border-0 py-1 px-3">
+                Trạng thái: {editableEval.status === "draft" ? "Nháp" : "Bị từ chối"}
+              </Badge>
+            </div>
           </div>
           
           <CardContent className="p-6 space-y-6">
