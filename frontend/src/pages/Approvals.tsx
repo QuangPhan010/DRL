@@ -224,9 +224,9 @@ export default function Approvals() {
 
       <Tabs defaultValue="pending">
         <TabsList className="grid grid-cols-3 w-full md:w-fit">
-          <TabsTrigger value="pending">Chờ duyệt ({pending.length})</TabsTrigger>
-          <TabsTrigger value="approved">Đã duyệt ({approved.length})</TabsTrigger>
-          <TabsTrigger value="rejected">Từ chối / Bổ sung ({rejected.length})</TabsTrigger>
+          <TabsTrigger value="pending" className="text-[10px] sm:text-sm px-1">Chờ duyệt ({pending.length})</TabsTrigger>
+          <TabsTrigger value="approved" className="text-[10px] sm:text-sm px-1">Đã duyệt ({approved.length})</TabsTrigger>
+          <TabsTrigger value="rejected" className="text-[10px] sm:text-sm px-1">Từ chối / Bổ sung ({rejected.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="pending" className="mt-4">{renderTable(pending)}</TabsContent>
         <TabsContent value="approved" className="mt-4">{renderTable(approved)}</TabsContent>

@@ -14,3 +14,11 @@ numpy>=1.23.5
 
 # Vietnam timezone handling used by attendance windows
 pytz>=2025.1
+
+# Face ID / Face recognition dependencies (Python 3.10-3.13)
+deepface>=0.0.93
+opencv-python>=4.10
+tensorflow>=2.16.0
+tf-keras>=2.16.0
+reportlab>=4.1.0
+

@@ -59,7 +59,7 @@ export default function ErrorPage({
           <div className="flex gap-3 w-full">
             <Button 
               variant="outline" 
-              className="flex-1 h-10 gap-2 border-border/60 hover:bg-background rounded-xl font-semibold text-xs sm:text-sm"
+              className="flex-1 h-10 gap-2 border-border/60 hover:bg-accent hover:text-accent-foreground text-foreground rounded-xl font-semibold text-xs sm:text-sm"
               onClick={() => navigate("/")}
             >
               <Home className="h-4 w-4 text-muted-foreground" />

@@ -124,14 +124,30 @@ export default function MyScores() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error" | "offline">("idle");
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const isInitialLoad = useRef(true);
-  const queueRef = useRef<{ scores: Record<string, number>; note: string } | null>(null);
+  
+  // DraftStateManager Refs & States
+  const pendingChangesRef = useRef<Record<string, number>>({});
+  const dirtyFieldsRef = useRef<Set<string>>(new Set());
+  const pendingNoteRef = useRef<string | null>(null);
+  const originalNoteRef = useRef<string>("");
+  const saveQueueRef = useRef<{ scores: Record<string, number>; note: string | null } | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+
+  // Optimistic Locking States & Refs
+  const clientVersionRef = useRef<number>(1);
+  const [serverVersion, setServerVersion] = useState<number>(1);
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [conflictMessage, setConflictMessage] = useState("");
 
   // Monitor network status
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      if (queueRef.current) {
-        triggerSave(queueRef.current.scores, queueRef.current.note);
+      if (saveQueueRef.current) {
+        const { scores, note } = saveQueueRef.current;
+        const savedDirtyFields = new Set(Object.keys(scores));
+        const savedPendingChanges = { ...scores };
+        triggerSave(scores, note, savedDirtyFields, savedPendingChanges, note);
       }
     };
     const handleOffline = () => {
@@ -146,7 +162,15 @@ export default function MyScores() {
     };
   }, []);
 
-  const triggerSave = async (scores: Record<string, number>, note: string, retries = 3, delay = 1000) => {
+  const triggerSave = async (
+    scores: Record<string, number>,
+    note: string | null,
+    savedDirtyFields: Set<string>,
+    savedPendingChanges: Record<string, number>,
+    savedPendingNote: string | null,
+    retries = 3,
+    delay = 1000
+  ) => {
     if (!editableEval) return;
 
     if (editableEval.status !== "draft" && editableEval.status !== "rejected") {
@@ -154,7 +178,14 @@ export default function MyScores() {
     }
 
     if (!navigator.onLine) {
-      queueRef.current = { scores, note };
+      saveQueueRef.current = { scores, note };
+      savedDirtyFields.forEach(key => {
+        dirtyFieldsRef.current.add(key);
+        pendingChangesRef.current[key] = savedPendingChanges[key];
+      });
+      if (savedPendingNote !== null) {
+        pendingNoteRef.current = savedPendingNote;
+      }
       setSaveStatus("offline");
       return;
     }
@@ -165,11 +196,27 @@ export default function MyScores() {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
+      const payload: any = { scores, clientVersion: clientVersionRef.current };
+      if (note !== null) {
+        payload.note = note;
+      }
+
       const res = await fetch(`${API_URL}/evaluations/${editableEval.id}/save-draft/`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ scores, note }),
+        body: JSON.stringify(payload),
       });
+
+      if (res.status === 409) {
+        setSaveStatus("error");
+        const data = await res.json().catch(() => ({}));
+        if (data.reason === "VERSION_CONFLICT") {
+          setServerVersion(data.serverVersion);
+          setConflictMessage(data.message || "Dữ liệu đã được chỉnh sửa từ một phiên khác.");
+          setConflictOpen(true);
+        }
+        return;
+      }
 
       if (res.status === 403) {
         setSaveStatus("error");
@@ -183,22 +230,58 @@ export default function MyScores() {
         return;
       }
 
-      if (!res.ok) throw new Error("API error");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "API error");
+      }
 
-      queueRef.current = null;
+      const wasInQueue = saveQueueRef.current !== null;
+      saveQueueRef.current = null;
       setSaveStatus("saved");
+      setLastSavedAt(new Date().toLocaleTimeString());
+      if (wasInQueue) {
+        toast.success("Đã đồng bộ thành công dữ liệu lưu nháp!");
+      }
       
       const data = await res.json();
-      setEvals(current => current.map(e => e.id === data.id ? { ...e, ...data } : e));
+      if (data.success) {
+        if (note !== null) {
+          originalNoteRef.current = note;
+        }
+        
+        const newVer = Number(data.serverVersion || clientVersionRef.current + 1);
+        clientVersionRef.current = newVer;
+        setServerVersion(newVer);
+
+        setEvals(current => current.map(e => {
+          if (e.id === editableEval.id) {
+            return {
+              ...e,
+              total_score: data.total_score,
+              classification: data.classification,
+              note: note !== null ? note : e.note,
+              version: newVer
+            };
+          }
+          return e;
+        }));
+      }
     } catch (error) {
       if (retries > 0 && navigator.onLine) {
         setTimeout(() => {
-          triggerSave(scores, note, retries - 1, delay * 1.5);
+          triggerSave(scores, note, savedDirtyFields, savedPendingChanges, savedPendingNote, retries - 1, delay * 1.5);
         }, delay);
       } else {
         setSaveStatus("error");
-        queueRef.current = { scores, note };
-        toast.error("Lỗi tự động lưu nháp. Hệ thống sẽ thử lại.");
+        savedDirtyFields.forEach(key => {
+          dirtyFieldsRef.current.add(key);
+          pendingChangesRef.current[key] = savedPendingChanges[key];
+        });
+        if (savedPendingNote !== null) {
+          pendingNoteRef.current = savedPendingNote;
+        }
+        saveQueueRef.current = { scores, note };
+        toast.error(error instanceof Error ? error.message : "Lỗi tự động lưu nháp. Hệ thống sẽ thử lại.");
       }
     }
   };
@@ -212,8 +295,20 @@ export default function MyScores() {
     isInitialLoad.current = true;
     setSelfScores(nextScores);
     setSelfNote(editableEval.note || "");
+    originalNoteRef.current = editableEval.note || "";
     setSaveStatus("idle");
-    queueRef.current = null;
+    setLastSavedAt(null);
+
+    // Set optimistic lock version
+    const version = Number(editableEval.version || 1);
+    clientVersionRef.current = version;
+    setServerVersion(version);
+    
+    // Reset DraftStateManager
+    pendingChangesRef.current = {};
+    dirtyFieldsRef.current.clear();
+    pendingNoteRef.current = null;
+    saveQueueRef.current = null;
   }, [editableEval?.id]);
 
   useEffect(() => {
@@ -222,19 +317,45 @@ export default function MyScores() {
       return;
     }
 
+    if (selfNote !== originalNoteRef.current) {
+      pendingNoteRef.current = selfNote;
+    } else {
+      pendingNoteRef.current = null;
+    }
+
+    if (dirtyFieldsRef.current.size === 0 && pendingNoteRef.current === null) {
+      return;
+    }
+
     setSaveStatus("saving");
     const timer = setTimeout(() => {
-      triggerSave(selfScores, selfNote);
+      const dirtyScores: Record<string, number> = {};
+      dirtyFieldsRef.current.forEach(key => {
+        dirtyScores[key] = pendingChangesRef.current[key];
+      });
+
+      const noteToSave = pendingNoteRef.current;
+      const savedDirtyFields = new Set(dirtyFieldsRef.current);
+      const savedPendingChanges = { ...pendingChangesRef.current };
+      const savedPendingNote = pendingNoteRef.current;
+
+      dirtyFieldsRef.current.clear();
+      pendingNoteRef.current = null;
+
+      triggerSave(dirtyScores, noteToSave, savedDirtyFields, savedPendingChanges, savedPendingNote);
     }, 3000);
 
     return () => clearTimeout(timer);
   }, [selfScores, selfNote]);
 
   const changeSelfScore = (subItemId: number, score: number) => {
+    const val = Number.isFinite(score) ? score : 0;
     setSelfScores(current => ({
       ...current,
-      [String(subItemId)]: Number.isFinite(score) ? score : 0,
+      [String(subItemId)]: val,
     }));
+    pendingChangesRef.current[String(subItemId)] = val;
+    dirtyFieldsRef.current.add(String(subItemId));
   };
 
   const submitSelfAssessment = async () => {
@@ -247,10 +368,35 @@ export default function MyScores() {
       const res = await fetch(`${API_URL}/evaluations/${editableEval.id}/submit-self-assessment/`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ scores: selfScores, note: selfNote }),
+        body: JSON.stringify({ 
+          scores: selfScores, 
+          note: selfNote, 
+          clientVersion: clientVersionRef.current 
+        }),
       });
-      if (!res.ok) throw new Error("Không thể nộp phiếu tự đánh giá");
+
+      if (res.status === 409) {
+        const data = await res.json().catch(() => ({}));
+        if (data.reason === "VERSION_CONFLICT") {
+          setServerVersion(data.serverVersion);
+          setConflictMessage(data.message || "Dữ liệu đã được chỉnh sửa từ một phiên khác.");
+          setConflictOpen(true);
+        }
+        return;
+      }
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Không thể nộp phiếu tự đánh giá");
+      }
+
       toast.success("Đã nộp phiếu tự đánh giá lên cán bộ lớp");
+      
+      const data = await res.json();
+      const newVer = Number(data.serverVersion || clientVersionRef.current + 1);
+      clientVersionRef.current = newVer;
+      setServerVersion(newVer);
+
       fetchMyScores();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Không thể nộp phiếu tự đánh giá");
@@ -565,7 +711,7 @@ export default function MyScores() {
               )}
               {saveStatus === "saved" && (
                 <Badge className="bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30 border-0 py-1 px-3 gap-1">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Đã tự động lưu nháp
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Đã tự động lưu nháp {lastSavedAt ? `lúc ${lastSavedAt}` : ""}
                 </Badge>
               )}
               {saveStatus === "offline" && (
@@ -741,6 +887,50 @@ export default function MyScores() {
           </CardContent>
         </Card>
       )}
+
+      {/* Version Conflict Dialog */}
+      <Dialog open={conflictOpen} onOpenChange={setConflictOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-rose-500">
+              <AlertCircle className="h-5 w-5 animate-pulse" /> Xung đột phiên bản dữ liệu
+            </DialogTitle>
+            <DialogDescription>
+              {conflictMessage} Phiên bản trên máy chủ hiện tại là <strong>v{serverVersion}</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-sm text-muted-foreground space-y-2">
+            <p>
+              Dữ liệu của bạn chưa được lưu để tránh ghi đè lên các thay đổi mới nhất từ phiên làm việc khác. Bạn có thể chọn:
+            </p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li><strong>Sao chép dữ liệu</strong>: Lưu lại các điểm số và ghi chú đã nhập vào clipboard.</li>
+              <li><strong>Tải lại dữ liệu</strong>: Cập nhật dữ liệu mới nhất từ máy chủ (điểm cũ sẽ bị mất).</li>
+            </ul>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                const dataToCopy = `Điểm tự chấm:\n${JSON.stringify(selfScores, null, 2)}\nGhi chú:\n${selfNote}`;
+                navigator.clipboard.writeText(dataToCopy);
+                toast.success("Đã sao chép dữ liệu chỉnh sửa vào clipboard!");
+              }}
+            >
+              Sao chép dữ liệu
+            </Button>
+            <Button 
+              className="bg-primary hover:bg-primary-glow"
+              onClick={() => {
+                fetchMyScores();
+                setConflictOpen(false);
+              }}
+            >
+              Tải lại dữ liệu
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useLocation } from "react-router-dom";
 import { useEffect } from "react";
+import ErrorPage from "./ErrorPage";
 
 const NotFound = () => {
   const location = useLocation();
@@ -9,15 +10,11 @@ const NotFound = () => {
   }, [location.pathname]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">404</h1>
-        <p className="mb-4 text-xl text-muted-foreground">Oops! Page not found</p>
-        <a href="/" className="text-primary underline hover:text-primary/90">
-          Return to Home
-        </a>
-      </div>
-    </div>
+    <ErrorPage 
+      code="404"
+      title="Không tìm thấy trang"
+      message="Đường dẫn bạn truy cập không tồn tại hoặc đã bị di chuyển."
+    />
   );
 };
 

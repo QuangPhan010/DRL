@@ -121,6 +121,7 @@ export default function Criteria() {
   const [criteriaSets, setCriteriaSets] = useState<CriteriaSet[]>([]);
   const [selectedSetId, setSelectedSetId] = useState("");
   const [setDialogOpen, setSetDialogOpen] = useState(false);
+  const [isEditingSet, setIsEditingSet] = useState(false);
   const [criteriaSetName, setCriteriaSetName] = useState("");
   const [criteriaSetDescription, setCriteriaSetDescription] = useState("");
   const [setSemester, setSetSemester] = useState("HK1");
@@ -267,7 +268,55 @@ export default function Criteria() {
     setEffectiveFrom("");
     setEffectiveTo("");
     setCopyCurrentSet(Boolean(selectedSetId));
+    setIsEditingSet(false);
     setSetDialogOpen(true);
+  };
+
+  const openEditSet = () => {
+    if (!selectedSet) return;
+    setCriteriaSetName(selectedSet.name);
+    setCriteriaSetDescription(selectedSet.description);
+    setSetSemester(selectedSet.semester || "HK1");
+    setSetAcademicYear(selectedSet.academicYear || "");
+    setEffectiveFrom(selectedSet.effectiveFrom || "");
+    setEffectiveTo(selectedSet.effectiveTo || "");
+    setIsEditingSet(true);
+    setSetDialogOpen(true);
+  };
+
+  const saveCriteriaSet = async () => {
+    if (!criteriaSetName.trim()) {
+      toast.error("Vui lòng nhập tên bộ tiêu chí");
+      return;
+    }
+    if (effectiveFrom && effectiveTo && effectiveFrom > effectiveTo) {
+      toast.error("Ngày bắt đầu phải trước ngày kết thúc");
+      return;
+    }
+    const payload = {
+      name: criteriaSetName.trim(),
+      description: criteriaSetDescription,
+      semester: setSemester,
+      academic_year: setAcademicYear,
+      effective_from: effectiveFrom || null,
+      effective_to: effectiveTo || null,
+    };
+    try {
+      const res = await fetch(`${API_URL}/criteria-sets/${selectedSetId}/`, {
+        method: "PATCH",
+        headers: mutationHeaders(),
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Không thể cập nhật bộ tiêu chí");
+      }
+      await refreshCriteriaSets(selectedSetId);
+      setSetDialogOpen(false);
+      toast.success("Đã cập nhật bộ tiêu chí thành công");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không thể cập nhật bộ tiêu chí");
+    }
   };
 
   const createCriteriaSet = async () => {
@@ -645,11 +694,18 @@ export default function Criteria() {
                   </SelectContent>
                 </Select>
               </div>
-              {selectedSet && !selectedSet.isActive && canEdit && (
-                <Button onClick={activateCriteriaSet} className="gap-2">
-                  <CheckCircle2 className="h-4 w-4" />Dùng bộ này
-                </Button>
-              )}
+              <div className="flex gap-2">
+                {selectedSet && canEdit && (
+                  <Button variant="outline" onClick={openEditSet} className="gap-2 border-amber-500 text-amber-600 hover:bg-amber-50/50">
+                    <Edit className="h-4 w-4" />Sửa thông tin
+                  </Button>
+                )}
+                {selectedSet && !selectedSet.isActive && canEdit && (
+                  <Button onClick={activateCriteriaSet} className="gap-2">
+                    <CheckCircle2 className="h-4 w-4" />Dùng bộ này
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -1027,9 +1083,13 @@ export default function Criteria() {
       <Dialog open={setDialogOpen} onOpenChange={setSetDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle className="font-display">Tạo bộ tiêu chí mới</DialogTitle>
+            <DialogTitle className="font-display">
+              {isEditingSet ? "Chỉnh sửa thông tin bộ tiêu chí" : "Tạo bộ tiêu chí mới"}
+            </DialogTitle>
             <DialogDescription>
-              Khai báo thời gian sử dụng. Sau khi kiểm tra cấu trúc, quản trị viên có thể chọn “Dùng bộ này”.
+              {isEditingSet 
+                ? "Cập nhật tên, học kỳ, năm học và thời gian hiệu lực cho bộ tiêu chí này."
+                : "Khai báo thời gian sử dụng. Sau khi kiểm tra cấu trúc, quản trị viên có thể chọn “Dùng bộ này”."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1068,7 +1128,7 @@ export default function Criteria() {
               <Label>Mô tả</Label>
               <Textarea value={criteriaSetDescription} onChange={event => setCriteriaSetDescription(event.target.value)} rows={2} />
             </div>
-            {selectedSet && (
+            {!isEditingSet && selectedSet && (
               <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
                 <input
                   type="checkbox"
@@ -1085,7 +1145,9 @@ export default function Criteria() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSetDialogOpen(false)}>Hủy</Button>
-            <Button onClick={createCriteriaSet}>Tạo bộ tiêu chí</Button>
+            <Button onClick={isEditingSet ? saveCriteriaSet : createCriteriaSet}>
+              {isEditingSet ? "Lưu thay đổi" : "Tạo bộ tiêu chí"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

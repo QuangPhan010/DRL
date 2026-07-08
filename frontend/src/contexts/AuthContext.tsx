@@ -32,10 +32,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [allUsers, setAllUsers] = useState<User[]>([]);
 
   useEffect(() => {
+    const refreshUserProfile = async () => {
+      const raw = localStorage.getItem("drl_user");
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        const token = localStorage.getItem("drl_token");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        const res = await fetch(`${API_URL}/users/${parsed.id}/`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          const refreshedUser: User = {
+            id: data.id.toString(),
+            username: data.username,
+            password: "",
+            fullName: data.full_name,
+            email: data.email,
+            role: data.role,
+            roles: data.roles || [data.role],
+            studentId: data.student_id,
+            isFirstLogin: data.is_first_login,
+            isActive: data.is_active,
+            avatar: data.avatar || "",
+            organizations: data.organizations || []
+          };
+          setUser(refreshedUser);
+        }
+      } catch (err) {
+        console.error("Lỗi làm mới thông tin tài khoản:", err);
+      }
+    };
+    
+    refreshUserProfile();
+  }, []);
+
+  useEffect(() => {
     if (user) {
       localStorage.setItem("drl_user", JSON.stringify(user));
-      // MockTokenAuthentication uses a deterministic token. Restore it for
-      // sessions created before token persistence was added.
       if (!localStorage.getItem("drl_token") && user.username) {
         localStorage.setItem("drl_token", `mock-token-for-${user.username}`);
       }

@@ -1,7 +1,7 @@
 import datetime
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from drl_app.models import ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization
+from drl_app.models import ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, Room
 
 User = get_user_model()
 
@@ -10,6 +10,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write('Clearing existing data...')
+        Room.objects.all().delete()
         UserOrganization.objects.all().delete()
         Organization.objects.all().delete()
         ActivityParticipant.objects.all().delete()
@@ -23,6 +24,17 @@ class Command(BaseCommand):
         Student.objects.all().delete()
         ClassInfo.objects.all().delete()
         User.objects.all().delete()
+
+        self.stdout.write('Creating rooms...')
+        rooms_data = [
+            { 'name': 'Hội trường A', 'capacity': 300, 'location': 'Tòa nhà A' },
+            { 'name': 'Hội trường B', 'capacity': 150, 'location': 'Tòa nhà B' },
+            { 'name': 'Phòng Hội thảo 1', 'capacity': 80, 'location': 'Tòa nhà C' },
+            { 'name': 'Phòng Hội thảo 2', 'capacity': 50, 'location': 'Tòa nhà C' },
+            { 'name': 'Phòng họp Đoàn thanh niên', 'capacity': 30, 'location': 'Tòa nhà Trung tâm' },
+        ]
+        for r in rooms_data:
+            Room.objects.create(**r)
 
 
         self.stdout.write('Creating users...')

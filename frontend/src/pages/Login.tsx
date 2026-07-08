@@ -23,6 +23,42 @@ export default function Login() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
+  const [showFirstLoginDialog, setShowFirstLoginDialog] = useState(false);
+  const [firstLoginMssv, setFirstLoginMssv] = useState("");
+  const [requestingPassword, setRequestingPassword] = useState(false);
+
+  const handleRequestPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firstLoginMssv) {
+      toast.error("Vui lòng nhập MSSV.");
+      return;
+    }
+    setRequestingPassword(true);
+    try {
+      const res = await fetch(`${API_URL}/request-first-login-password/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: firstLoginMssv })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(data.message || "Mật khẩu đã được cấp và gửi đến email.");
+        if (data.plain_password) {
+          toast.info(`[Demo] Mật khẩu cấp: ${data.plain_password}`, { duration: 10000 });
+        }
+        setShowFirstLoginDialog(false);
+        setFirstLoginMssv("");
+      } else {
+        toast.error(data.error || "Gặp lỗi khi yêu cầu cấp mật khẩu.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi kết nối máy chủ.");
+    } finally {
+      setRequestingPassword(false);
+    }
+  };
+
   if (user) return <Navigate to="/" replace />;
 
   const requestLoginGps = async () => {
@@ -39,7 +75,7 @@ export default function Login() {
     setLoading(true);
     const res = await login(username, password);
     setLoading(false);
-    
+
     if (res.isInactive) {
       toast.error("Tài khoản của bạn đã bị khóa bởi Quản trị viên.");
       return;
@@ -145,6 +181,15 @@ export default function Login() {
             <Button type="submit" disabled={loading} className="w-full h-11 bg-gradient-primary hover:opacity-90 shadow-elegant font-semibold">
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Đăng nhập"}
             </Button>
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => setShowFirstLoginDialog(true)}
+                className="text-xs text-primary hover:underline font-semibold"
+              >
+                Đăng nhập lần đầu? Nhận mật khẩu qua Email
+              </button>
+            </div>
           </form>
         </div>
       </div>
@@ -171,6 +216,36 @@ export default function Login() {
             </div>
             <DialogFooter className="pt-2">
               <Button type="submit" className="bg-gradient-primary w-full">Cập nhật mật khẩu mới</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Request Password for First Login */}
+      <Dialog open={showFirstLoginDialog} onOpenChange={setShowFirstLoginDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display">Cấp mật khẩu lần đầu</DialogTitle>
+            <DialogDescription>
+              Nhập mã sinh viên (MSSV) của bạn. Hệ thống sẽ sinh mật khẩu ngẫu nhiên và gửi tới địa chỉ email sinh viên của bạn đã đăng ký trên hệ thống.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleRequestPassword} className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="first-login-mssv">Mã số sinh viên (MSSV) *</Label>
+              <Input
+                id="first-login-mssv"
+                value={firstLoginMssv}
+                onChange={e => setFirstLoginMssv(e.target.value)}
+                required
+                placeholder="Nhập MSSV của bạn"
+              />
+            </div>
+            <DialogFooter className="pt-2">
+              <Button type="submit" disabled={requestingPassword} className="bg-gradient-primary w-full">
+                {requestingPassword ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Nhận mật khẩu qua Email
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

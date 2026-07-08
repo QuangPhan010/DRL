@@ -182,9 +182,7 @@ export function AppHeader() {
             subtitle: student.class_name || student.email || "Sinh viên",
             target: roles.includes("student") && !roles.includes("class_monitor")
               ? "/profile"
-              : roles.includes("academic_affairs")
-                ? `/data-sync?search=${encodeURIComponent(student.student_id)}`
-                : `/students?search=${encodeURIComponent(student.student_id)}`,
+              : `/students?search=${encodeURIComponent(student.student_id)}`,
           }));
 
         const canSearchEvaluations = roles.some(role =>

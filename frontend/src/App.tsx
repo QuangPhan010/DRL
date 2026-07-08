@@ -20,13 +20,14 @@ const Activities = lazy(() => import("./pages/Activities"));
 const ActivityDetail = lazy(() => import("./pages/ActivityDetail"));
 const ActivityForm = lazy(() => import("./pages/ActivityForm"));
 const ClassReview = lazy(() => import("./pages/ClassReview"));
-const DataSync = lazy(() => import("./pages/DataSync"));
 const AcademicTranscriptImport = lazy(() => import("./pages/AcademicTranscriptImport"));
 const Classes = lazy(() => import("./pages/Classes"));
 const Profile = lazy(() => import("./pages/Profile"));
 const EvaluationSession = lazy(() => import("./pages/EvaluationSession"));
 const Organizations = lazy(() => import("./pages/Organizations"));
+const Reports = lazy(() => import("./pages/Reports")); // Reporting Center Page
 const ErrorPage = lazy(() => import("./pages/ErrorPage"));
+const EmailPreview = lazy(() => import("./pages/EmailPreview"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -56,11 +57,12 @@ const App = () => (
                 <Route path="/activities/:id" element={<ActivityDetail />} />
                 <Route path="/activities/:id/edit" element={<ActivityForm />} />
                 <Route path="/class-review" element={<ClassReview />} />
-                <Route path="/data-sync" element={<DataSync />} />
                 <Route path="/academic-transcript-import" element={<AcademicTranscriptImport />} />
                 <Route path="/evaluation-sessions/create" element={<EvaluationSession />} />
                 <Route path="/organizations" element={<Organizations />} />
                 <Route path="/profile" element={<Profile />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/email-preview" element={<EmailPreview />} />
               </Route>
 
               <Route path="*" element={<NotFound />} />

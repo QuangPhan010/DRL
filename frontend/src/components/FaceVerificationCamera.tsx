@@ -47,7 +47,11 @@ export default function FaceVerificationCamera({ avatar, onVerified }: Props) {
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (playError) {
+          console.warn("Video play interrupted:", playError);
+        }
       }
       setCameraActive(true);
       setCapturedImage(null);

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag, SystemConfig, Notification
+from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag, SystemConfig, Notification, Room
 
 class ClassPositionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -298,14 +298,20 @@ class ActivityParticipantSerializer(serializers.ModelSerializer):
         checkout = obj.activity.checkouts.filter(student=obj.student).order_by('-check_out_time').first()
         return timezone.localtime(checkout.check_out_time).isoformat() if checkout else None
 
+class RoomSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Room
+        fields = ('id', 'name', 'capacity', 'location')
+
 class ActivitySerializer(serializers.ModelSerializer):
     participants = ActivityParticipantSerializer(many=True, read_only=True)
     check_in_time = serializers.SerializerMethodField()
     max_participants = serializers.IntegerField(min_value=1, default=100)
+    room_detail = RoomSerializer(source='room', read_only=True)
 
     class Meta:
         model = Activity
-        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'max_participants', 'check_in_time', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end')
+        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'max_participants', 'check_in_time', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end', 'room', 'room_detail')
 
     def validate_organizer(self, value):
         organizer = value.strip()

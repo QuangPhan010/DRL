@@ -10,14 +10,14 @@ from django.contrib.auth import authenticate
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag, SystemConfig, Notification
+from .models import User, ClassInfo, Student, CriteriaSet, Criterion, GroupCriterion, SubItem, Evaluation, EvaluationDetail, Activity, ActivityParticipant, Organization, UserOrganization, ClassPosition, StudentClassPosition, ActivityCheckIn, ActivityCheckOut, ActivityAttendance, FraudDetection, AuditLog, ChangeRequest, ExternalActivity, EvidenceFile, EvidenceReview, FraudFlag, SystemConfig, Notification, Room
 from .serializers import (
     UserSerializer, ClassInfoSerializer, StudentSerializer, CriteriaSetSerializer, CriterionSerializer,
     EvaluationSerializer, ActivitySerializer, ActivityParticipantSerializer,
     OrganizationSerializer, UserOrganizationSerializer, ClassPositionSerializer, StudentClassPositionSerializer,
     ActivityCheckInSerializer, ActivityCheckOutSerializer, ActivityAttendanceSerializer, FraudDetectionSerializer, AuditLogSerializer, ChangeRequestSerializer,
     ExternalActivitySerializer, EvidenceFileSerializer, EvidenceReviewSerializer, FraudFlagSerializer, SystemConfigSerializer,
-    NotificationSerializer
+    NotificationSerializer, RoomSerializer
 )
 
 def create_notification(user, title, message):
@@ -72,10 +72,13 @@ def extract_face_embedding_from_base64(base64_str):
             objs = sorted(objs, key=lambda face: face["facial_area"]["w"] * face["facial_area"]["h"], reverse=True)
             
         return objs[0]["embedding"], None
-    except ImportError:
+    except ImportError as e:
+        import traceback
+        traceback.print_exc()
         return None, (
             "Tính năng nhận diện khuôn mặt chưa được cài đặt. "
-            "Hãy cài các gói trong requirements-face.txt bằng Python 3.10-3.13."
+            "Hãy cài các gói trong requirements.txt bằng Python 3.10-3.13. "
+            f"Chi tiết lỗi: {str(e)}"
         )
     except Exception as e:
         import traceback
@@ -366,6 +369,173 @@ def change_password_view(request):
     user.plain_password = ""
     user.save()
     return Response({'message': 'Password changed successfully', 'user': UserSerializer(user).data})
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def request_first_login_password(request):
+    student_id = request.data.get('student_id')
+    if not student_id:
+        return Response({'error': 'Vui lòng cung cấp mã sinh viên (MSSV).'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    student = Student.objects.filter(student_id__iexact=student_id).first()
+    if not student:
+        return Response({'error': 'Không tìm thấy sinh viên trong hệ thống.'}, status=status.HTTP_404_NOT_FOUND)
+        
+    user = student.user
+    if not user:
+        return Response({'error': 'Tài khoản sinh viên chưa được liên kết.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+    if not user.is_first_login:
+        return Response({'error': 'Tài khoản này đã đăng nhập và đổi mật khẩu trước đó.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+    import random
+    import string
+    random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+    user.set_password(random_password)
+    user.plain_password = random_password
+    user.save()
+    
+    from django.core.mail import send_mail
+    from django.conf import settings
+    
+    subject = "[ITC Point] Mật khẩu đăng nhập lần đầu"
+    message = f"Chào {student.full_name},\n\nTài khoản ITC Point của bạn đã sẵn sàng.\nMật khẩu đăng nhập lần đầu của bạn là: {random_password}\n\nVui lòng đăng nhập và thực hiện đổi mật khẩu ngay sau đó."
+    
+    html_message = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <!-- Header with gradient background -->
+  <div style="background: linear-gradient(135deg, #3b82f6, #06b6d4); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">ITC Point</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Hệ Thống Quản Lý Điểm Rèn Luyện Trực Tuyến</p>
+  </div>
+  
+  <!-- Main content body -->
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">Chào {student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px; margin-top: 12px;">Tài khoản đánh giá điểm rèn luyện trực tuyến của bạn đã được thiết lập thành công. Vui lòng sử dụng thông tin đăng nhập tạm thời dưới đây để đăng nhập lần đầu vào hệ thống:</p>
+    
+    <!-- Info Box -->
+    <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #f1f5f9; border-left: 4px solid #3b82f6;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 6px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 130px; text-transform: uppercase; letter-spacing: 0.5px;">Tên đăng nhập:</td>
+          <td style="padding: 6px 0; font-size: 15px; color: #0f172a; font-weight: 700; font-family: monospace;">{student.student_id}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Mật khẩu tạm:</td>
+          <td style="padding: 6px 0; font-size: 16px; color: #ef4444; font-weight: 700; font-family: monospace; letter-spacing: 1px;">{random_password}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- CTA Button -->
+    <div style="text-align: center; margin: 36px 0 28px 0;">
+      <a href="http://localhost:8080/login" style="background: linear-gradient(135deg, #3b82f6, #06b6d4); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.3); letter-spacing: -0.2px;">Đăng nhập hệ thống</a>
+    </div>
+
+    <!-- Important Notice -->
+    <div style="background-color: #fef2f2; border-radius: 8px; padding: 14px 18px; border: 1px solid #fee2e2; margin-top: 24px;">
+      <p style="color: #b91c1c; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+        * Quan trọng: Đây là mật khẩu tự động tạm thời. Bạn bắt buộc phải đổi sang mật khẩu bảo mật của riêng mình ngay tại lần đầu đăng nhập.
+      </p>
+    </div>
+  </div>
+  
+  <!-- Footer section -->
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px; line-height: 1.5;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+    
+    try:
+        send_mail(
+            subject,
+            message,
+            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+            [student.email],
+            fail_silently=False,
+            html_message=html_message,
+        )
+        return Response({'message': 'Mật khẩu đã được gửi về email của sinh viên thành công.'})
+    except Exception as e:
+        return Response({
+            'message': 'Đã cập nhật mật khẩu hệ thống (Gửi mail thất bại, cấu hình SMTP chưa đúng).',
+            'plain_password': random_password
+        })
+
+class RoomViewSet(viewsets.ModelViewSet):
+    queryset = Room.objects.all()
+    serializer_class = RoomSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @action(detail=False, methods=['post'], url_path='check-availability')
+    def check_availability(self, request):
+        date_str = request.data.get('date')
+        start_time_str = request.data.get('start_time')
+        end_time_str = request.data.get('end_time')
+        exclude_activity_id = request.data.get('exclude_activity_id')
+
+        if not (date_str and start_time_str and end_time_str):
+            return Response({'error': 'Vui lòng cung cấp đầy đủ thông tin: date, start_time, end_time.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            if isinstance(date_str, str):
+                date_val = datetime.datetime.strptime(date_str.split('T')[0], '%Y-%m-%d').date()
+            else:
+                date_val = date_str
+
+            # Normalize times (only take HH:MM, ignore seconds if present)
+            st_clean = ':'.join(start_time_str.split(':')[:2])
+            et_clean = ':'.join(end_time_str.split(':')[:2])
+
+            start_time_val = datetime.datetime.strptime(st_clean, '%H:%M').time()
+            end_time_val = datetime.datetime.strptime(et_clean, '%H:%M').time()
+        except ValueError as e:
+            return Response({'error': f'Định dạng ngày/giờ không hợp lệ: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        rooms = Room.objects.all()
+        result = []
+
+        for room in rooms:
+            conflicts = Activity.objects.filter(
+                room=room,
+                date=date_val,
+                start_time__lt=end_time_val,
+                end_time__gt=start_time_val
+            )
+            
+            if exclude_activity_id:
+                try:
+                    conflicts = conflicts.exclude(id=int(exclude_activity_id))
+                except ValueError:
+                    pass
+
+            conflicting_activity = conflicts.first()
+
+            if conflicting_activity:
+                st_str = conflicting_activity.start_time.strftime('%H:%M') if conflicting_activity.start_time else ""
+                et_str = conflicting_activity.end_time.strftime('%H:%M') if conflicting_activity.end_time else ""
+                conflict_info = {
+                    'title': conflicting_activity.title,
+                    'time': f"{st_str} - {et_str}"
+                }
+                is_available = False
+            else:
+                conflict_info = None
+                is_available = True
+
+            result.append({
+                'id': room.id,
+                'name': room.name,
+                'capacity': room.capacity,
+                'location': room.location,
+                'is_available': is_available,
+                'conflict_info': conflict_info
+            })
+
+        return Response(result)
 
 # 2. ClassInfo ViewSet
 class ClassInfoViewSet(viewsets.ModelViewSet):
@@ -667,6 +837,11 @@ class StudentViewSet(viewsets.ModelViewSet):
                         if phone:
                             student_obj.phone = phone
                         student_obj.save()
+                        
+                        if student_obj.user:
+                            student_obj.user.full_name = full_name
+                            student_obj.user.email = email
+                            student_obj.user.save()
 
             if processed_sheets == 0:
                 return Response({
@@ -1226,6 +1401,81 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
+    def _error_res(self, code, message, details=None, status_code=400):
+        return Response({
+            'success': False,
+            'code': code,
+            'message': message,
+            'details': details or {}
+        }, status=status_code)
+
+    def update(self, request, *args, **kwargs):
+        evaluation = self.get_object()
+        client_version = request.data.get('clientVersion')
+        
+        from .services.workflow_guard import validate_evaluation_write_access, VersionConflictException, WorkflowLockedException, IllegalUpdateException
+        from django.core.exceptions import ValidationError
+        
+        try:
+            validate_evaluation_write_access(
+                evaluation=evaluation,
+                user=request.user,
+                client_version=client_version,
+                request=request
+            )
+        except VersionConflictException as e:
+            return self._error_res('VERSION_CONFLICT', str(e), {'serverVersion': e.server_version}, status.HTTP_409_CONFLICT)
+        except WorkflowLockedException as e:
+            return self._error_res('WORKFLOW_LOCKED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except IllegalUpdateException as e:
+            return self._error_res('UNAUTHORIZED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except ValidationError as e:
+            return self._error_res('VALIDATION_ERROR', str(e), {}, status.HTTP_400_BAD_REQUEST)
+            
+        response = super().update(request, *args, **kwargs)
+        if response.status_code == status.HTTP_200_OK:
+            evaluation.refresh_from_db()
+            evaluation.version += 1
+            evaluation.save(update_fields=['version'])
+            response.data['serverVersion'] = evaluation.version
+            # Log the edit
+            from .services.workflow_guard import log_audit
+            log_audit(user=request.user, action='Draft Updated', entity_id=evaluation.id, before_value='', after_value=f"version={evaluation.version}", request=request)
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        evaluation = self.get_object()
+        client_version = request.data.get('clientVersion')
+        
+        from .services.workflow_guard import validate_evaluation_write_access, VersionConflictException, WorkflowLockedException, IllegalUpdateException
+        from django.core.exceptions import ValidationError
+        
+        try:
+            validate_evaluation_write_access(
+                evaluation=evaluation,
+                user=request.user,
+                client_version=client_version,
+                request=request
+            )
+        except VersionConflictException as e:
+            return self._error_res('VERSION_CONFLICT', str(e), {'serverVersion': e.server_version}, status.HTTP_409_CONFLICT)
+        except WorkflowLockedException as e:
+            return self._error_res('WORKFLOW_LOCKED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except IllegalUpdateException as e:
+            return self._error_res('UNAUTHORIZED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except ValidationError as e:
+            return self._error_res('VALIDATION_ERROR', str(e), {}, status.HTTP_400_BAD_REQUEST)
+            
+        response = super().partial_update(request, *args, **kwargs)
+        if response.status_code == status.HTTP_200_OK:
+            evaluation.refresh_from_db()
+            evaluation.version += 1
+            evaluation.save(update_fields=['version'])
+            response.data['serverVersion'] = evaluation.version
+            from .services.workflow_guard import log_audit
+            log_audit(user=request.user, action='Draft Updated', entity_id=evaluation.id, before_value='', after_value=f"version={evaluation.version}", request=request)
+        return response
+
     def create(self, request, *args, **kwargs):
         import time
         from django.db import OperationalError
@@ -1319,19 +1569,26 @@ class EvaluationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='submit-self-assessment')
     def submit_self_assessment(self, request, pk=None):
         evaluation = self.get_object()
-        if evaluation.status not in ('draft', 'rejected'):
-            return Response(
-                {'error': 'Phiếu này không còn ở trạng thái cho phép sinh viên tự đánh giá.'},
-                status=status.HTTP_400_BAD_REQUEST,
+        client_version = request.data.get('clientVersion')
+        
+        from .services.workflow_guard import validate_evaluation_write_access, VersionConflictException, WorkflowLockedException, IllegalUpdateException
+        from django.core.exceptions import ValidationError
+        
+        try:
+            validate_evaluation_write_access(
+                evaluation=evaluation,
+                user=request.user,
+                client_version=client_version,
+                request=request
             )
-
-        if request.user.is_authenticated:
-            student = getattr(request.user, 'student_profile', None)
-            if student and student.pk != evaluation.student_id:
-                return Response(
-                    {'error': 'Bạn chỉ được nộp phiếu đánh giá của chính mình.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        except VersionConflictException as e:
+            return self._error_res('VERSION_CONFLICT', str(e), {'serverVersion': e.server_version}, status.HTTP_409_CONFLICT)
+        except WorkflowLockedException as e:
+            return self._error_res('WORKFLOW_LOCKED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except IllegalUpdateException as e:
+            return self._error_res('UNAUTHORIZED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except ValidationError as e:
+            return self._error_res('VALIDATION_ERROR', str(e), {}, status.HTTP_400_BAD_REQUEST)
 
         scores_data = request.data.get('scores', {})
         note = request.data.get('note', evaluation.note or '')
@@ -1363,7 +1620,8 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             evaluation.status = 'class_pending'
             evaluation.class_confirmed = False
             evaluation.self_submitted_at = timezone.now()
-            evaluation.save(update_fields=('note', 'status', 'class_confirmed', 'self_submitted_at'))
+            evaluation.version += 1
+            evaluation.save(update_fields=('note', 'status', 'class_confirmed', 'self_submitted_at', 'version'))
             recalculate_evaluation_score(evaluation)
 
             # Send notifications
@@ -1389,83 +1647,88 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
         rebalance_training_score(evaluation.student)
         evaluation.refresh_from_db()
-        return Response(EvaluationSerializer(evaluation).data)
+        
+        serializer_data = EvaluationSerializer(evaluation).data
+        serializer_data['serverVersion'] = evaluation.version
+        return Response(serializer_data)
 
     @action(detail=True, methods=['post'], url_path='save-draft')
     def save_draft(self, request, pk=None):
+        import time
+        start_time = time.time()
         evaluation = self.get_object()
-        
-        # Case 4: Advisor Pending / non-draft non-rejected -> Không Auto Save
-        if evaluation.status not in ('draft', 'rejected'):
-            return Response(
-                {'error': 'Không thể tự động lưu khi phiếu đang trong trạng thái chờ duyệt hoặc đã duyệt.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        # Case 5: Session không hợp lệ -> 403
-        from .models import EvaluationSession
-        session_exists = EvaluationSession.objects.filter(
-            evaluation=evaluation, status='active'
-        ).exists() or EvaluationSession.objects.filter(
-            student=evaluation.student, semester=evaluation.semester, year=evaluation.year, status='active'
-        ).exists()
-        
-        if not session_exists:
-            return Response(
-                {'error': 'Phiếu đánh giá không có phiên hoạt động hợp lệ.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-            
-        if request.user.is_authenticated:
-            student = getattr(request.user, 'student_profile', None)
-            if student and student.pk != evaluation.student_id:
-                return Response(
-                    {'error': 'Bạn chỉ được lưu phiếu đánh giá của chính mình.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
         scores_data = request.data.get('scores', {})
-        note = request.data.get('note', evaluation.note or '')
-        manual_subitems = SubItem.objects.filter(
-            group__criterion__criteria_set=evaluation.criteria_set,
-            group__criterion__is_manual=True,
-        )
-        manual_subitem_ids = set(manual_subitems.values_list('id', flat=True))
+        note = request.data.get('note')
+        client_version = request.data.get('clientVersion')
 
-        with transaction.atomic():
-            if manual_subitem_ids:
-                evaluation.details.filter(sub_item_id__in=manual_subitem_ids).delete()
-            for sub_item_id, score_val in scores_data.items():
-                try:
-                    sub_item_id_int = int(sub_item_id)
-                    if sub_item_id_int not in manual_subitem_ids:
-                        continue
-                    sub_item = manual_subitems.get(id=sub_item_id_int)
-                    score = int(float(score_val or 0))
-                except (ValueError, TypeError, SubItem.DoesNotExist):
-                    continue
-                EvaluationDetail.objects.update_or_create(
-                    evaluation=evaluation,
-                    sub_item=sub_item,
-                    defaults={'score': score},
-                )
+        from .services.workflow_guard import VersionConflictException, log_audit
+        from .services.evaluation_bulk_service import save_evaluation_draft_bulk
+        from django.core.exceptions import ValidationError
+        from .services.evaluation_monitor import record_autosave_metrics
 
-            evaluation.note = note
-            evaluation.save(update_fields=('note',))
-            recalculate_evaluation_score(evaluation)
-
-        rebalance_training_score(evaluation.student)
-        evaluation.refresh_from_db()
-        return Response(EvaluationSerializer(evaluation).data)
+        try:
+            res_data = save_evaluation_draft_bulk(
+                evaluation=evaluation,
+                scores_data=scores_data,
+                note=note,
+                user=request.user,
+                client_version=client_version,
+                request=request,
+                recalculate_fn=recalculate_evaluation_score,
+                rebalance_fn=rebalance_training_score
+            )
+            duration_ms = int((time.time() - start_time) * 1000)
+            record_autosave_metrics(success=True, is_conflict=False, duration_ms=duration_ms)
+            
+            # Log standard audit event
+            log_audit(user=request.user, action='Auto Save', entity_id=evaluation.id, before_value='', after_value=f"version={evaluation.version}", request=request)
+            return Response(res_data, status=status.HTTP_200_OK)
+        except VersionConflictException as e:
+            record_autosave_metrics(success=False, is_conflict=True)
+            return self._error_res('VERSION_CONFLICT', str(e), {'serverVersion': e.server_version}, status.HTTP_409_CONFLICT)
+        except ValidationError as e:
+            record_autosave_metrics(success=False, is_conflict=False)
+            err_msg = e.message if hasattr(e, 'message') else str(e)
+            code = 'SESSION_INVALID' if 'phiên hoạt động' in err_msg else 'VALIDATION_ERROR'
+            status_code = status.HTTP_403_FORBIDDEN if code == 'SESSION_INVALID' else status.HTTP_400_BAD_REQUEST
+            return self._error_res(code, err_msg, {}, status_code)
+        except Exception as e:
+            record_autosave_metrics(success=False, is_conflict=False)
+            return self._error_res('SERVER_ERROR', str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'], url_path='review')
     def review(self, request, pk=None):
         evaluation = self.get_object()
+        client_version = request.data.get('clientVersion')
+        
+        from .services.workflow_guard import validate_evaluation_write_access, VersionConflictException, WorkflowLockedException, IllegalUpdateException, log_audit
+        from django.core.exceptions import ValidationError
+        
+        try:
+            validate_evaluation_write_access(
+                evaluation=evaluation,
+                user=request.user,
+                client_version=client_version,
+                request=request
+            )
+        except VersionConflictException as e:
+            return self._error_res('VERSION_CONFLICT', str(e), {'serverVersion': e.server_version}, status.HTTP_409_CONFLICT)
+        except WorkflowLockedException as e:
+            return self._error_res('WORKFLOW_LOCKED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except IllegalUpdateException as e:
+            return self._error_res('UNAUTHORIZED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except ValidationError as e:
+            return self._error_res('VALIDATION_ERROR', str(e), {}, status.HTTP_400_BAD_REQUEST)
+
         review_note = request.data.get('reviewNote', '')
         evaluation.class_confirmed = True
         evaluation.status = 'advisor_pending'
         evaluation.review_note = review_note
+        evaluation.version += 1
         evaluation.save()
+
+        # Log standard audit event
+        log_audit(user=request.user, action='Draft Updated', entity_id=evaluation.id, before_value='', after_value=f"status=class_reviewed_version={evaluation.version}", request=request)
 
         # Send notifications
         student_user = User.objects.filter(student_id=evaluation.student.student_id).first()
@@ -1482,20 +1745,52 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                 message=f"Phiếu rèn luyện của sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) đã được lớp thông qua và chờ bạn phê duyệt."
             )
 
-        return Response(EvaluationSerializer(evaluation).data)
+        serializer_data = EvaluationSerializer(evaluation).data
+        serializer_data['serverVersion'] = evaluation.version
+        return Response(serializer_data)
 
     @action(detail=True, methods=['post'], url_path='approve')
     def approve(self, request, pk=None):
         evaluation = self.get_object()
-        status_param = request.data.get('status') # 'approved', 'rejected', 'pending'
+        status_param = request.data.get('status')
         review_note = request.data.get('reviewNote', '')
+        client_version = request.data.get('clientVersion')
+        
+        from .services.workflow_guard import validate_evaluation_write_access, VersionConflictException, WorkflowLockedException, IllegalUpdateException, log_audit
+        from django.core.exceptions import ValidationError
+        
+        try:
+            validate_evaluation_write_access(
+                evaluation=evaluation,
+                user=request.user,
+                client_version=client_version,
+                request=request
+            )
+        except VersionConflictException as e:
+            return self._error_res('VERSION_CONFLICT', str(e), {'serverVersion': e.server_version}, status.HTTP_409_CONFLICT)
+        except WorkflowLockedException as e:
+            return self._error_res('WORKFLOW_LOCKED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except IllegalUpdateException as e:
+            return self._error_res('UNAUTHORIZED', str(e), {}, status.HTTP_403_FORBIDDEN)
+        except ValidationError as e:
+            return self._error_res('VALIDATION_ERROR', str(e), {}, status.HTTP_400_BAD_REQUEST)
         
         if status_param not in ['approved', 'rejected', 'pending']:
-            return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
+            return self._error_res('VALIDATION_ERROR', 'Trạng thái phê duyệt không hợp lệ.', {}, status.HTTP_400_BAD_REQUEST)
             
         evaluation.status = status_param
         evaluation.review_note = review_note
+        evaluation.version += 1
         evaluation.save()
+
+        # Audit standard action
+        audit_action = 'Advisor Approved'
+        if status_param == 'rejected':
+            audit_action = 'Advisor Rejected'
+        elif request.user.role == 'student_affairs':
+            audit_action = 'Student Affairs Approved'
+            
+        log_audit(user=request.user, action=audit_action, entity_id=evaluation.id, before_value='', after_value=f"status={status_param}_version={evaluation.version}", request=request)
 
         # Send notifications
         student_user = User.objects.filter(student_id=evaluation.student.student_id).first()
@@ -1513,7 +1808,17 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                     message=f"Phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn đã bị từ chối/yêu cầu bổ sung bởi Cố vấn học tập. Lý do: {review_note}"
                 )
 
-        return Response(EvaluationSerializer(evaluation).data)
+        serializer_data = EvaluationSerializer(evaluation).data
+        serializer_data['serverVersion'] = evaluation.version
+        return Response(serializer_data)
+
+    @action(detail=False, methods=['get'], url_path='health')
+    def health(self, request):
+        if not request.user.is_authenticated or request.user.role != 'admin':
+            return self._error_res('UNAUTHORIZED', 'Chỉ Admin mới có quyền truy cập thông tin sức khỏe hệ thống.', {}, status.HTTP_403_FORBIDDEN)
+            
+        from .services.evaluation_monitor import get_health_metrics
+        return Response(get_health_metrics(), status=status.HTTP_200_OK)
 
 # 6. Activity ViewSet
 class ActivityViewSet(viewsets.ModelViewSet):
@@ -1726,6 +2031,46 @@ class ActivityViewSet(viewsets.ModelViewSet):
         participant.status = 'attended'
         participant.save()
         return Response(ActivitySerializer(activity).data)
+
+    @action(detail=True, methods=['post'], url_path='import-attendance')
+    def import_attendance(self, request, pk=None):
+        activity = self.get_object()
+        student_codes = request.data.get('student_codes', [])
+        if not isinstance(student_codes, list):
+            return Response({'error': 'Danh sách mã sinh viên không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        success_count = 0
+        failed_codes = []
+        
+        for code in student_codes:
+            code_str = str(code).strip()
+            if not code_str:
+                continue
+            try:
+                student = Student.objects.filter(student_id__iexact=code_str).first()
+                if not student:
+                    failed_codes.append(code_str)
+                    continue
+                
+                from .models import ActivityParticipant
+                participant, created = ActivityParticipant.objects.get_or_create(
+                    activity=activity,
+                    student=student,
+                    defaults={'status': 'attended'}
+                )
+                if not created:
+                    participant.status = 'attended'
+                    participant.save()
+                success_count += 1
+            except Exception:
+                failed_codes.append(code_str)
+                
+        return Response({
+            'message': f'Nhập danh sách điểm danh thành công: {success_count} sinh viên.',
+            'success_count': success_count,
+            'failed_codes': failed_codes
+        })
+
 
     @action(detail=True, methods=['post'], url_path='approve-points')
     def approve_points(self, request, pk=None):

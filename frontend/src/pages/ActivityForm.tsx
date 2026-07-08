@@ -7,11 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { RadialTimePicker } from "./Activities";
 import { OrganizerPicker } from "@/components/OrganizerPicker";
 import Loading from "./Loading";
+import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const getLocalToday = () => {
   const now = new Date();
@@ -42,6 +45,11 @@ export default function ActivityForm() {
   const [endTime, setEndTime] = useState("11:00");
   const [maxParticipants, setMaxParticipants] = useState("100");
   const [registeredCount, setRegisteredCount] = useState(0);
+
+  const [roomId, setRoomId] = useState<string>("none");
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [checkingRooms, setCheckingRooms] = useState(false);
+  const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
 
   // New scope and registration fields
   const [scopeType, setScopeType] = useState<"all" | "class" | "club">("all");
@@ -119,6 +127,7 @@ export default function ActivityForm() {
             setSelectedClasses(act.allowed_classes || []);
             setSelectedClubs(act.allowed_clubs || []);
             setIsRegistrationRequired(!!act.is_registration_required);
+            setRoomId(act.room ? String(act.room) : "none");
 
             const toLocalDateAndTime = (isoString?: string) => {
               if (!isoString) return { date: getLocalToday(), time: "08:00" };
@@ -153,6 +162,53 @@ export default function ActivityForm() {
     };
     fetchData();
   }, [id, isEditing]);
+
+  useEffect(() => {
+    if (scope === "external") {
+      setRoomId("none");
+      return;
+    }
+    const checkRoomAvailability = async () => {
+      if (!date || !startTime || !endTime) return;
+      setCheckingRooms(true);
+      try {
+        const token = localStorage.getItem("drl_token");
+        const res = await fetch(`${API_URL}/rooms/check-availability/`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            date,
+            start_time: startTime,
+            end_time: endTime,
+            exclude_activity_id: id ? Number(id) : null
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setRooms(data);
+          // If the currently selected room is now booked by another activity, revert selection to none
+          const currentRoom = data.find((r: any) => String(r.id) === roomId);
+          if (currentRoom && !currentRoom.is_available) {
+            setRoomId("none");
+            toast.warning(`Phòng ${currentRoom.name} đã bị trùng lịch, vui lòng chọn phòng khác.`);
+          }
+        }
+      } catch (err) {
+        console.error("Error checking room availability:", err);
+      } finally {
+        setCheckingRooms(false);
+      }
+    };
+
+    const delayDebounceFn = setTimeout(() => {
+      checkRoomAvailability();
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [date, startTime, endTime, scope, id, roomId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,7 +255,8 @@ export default function ActivityForm() {
             allowed_clubs: scopeType === "club" ? selectedClubs : [],
             is_registration_required: isRegistrationRequired,
             registration_start: isRegistrationRequired && registrationStartDate && registrationStartTime ? new Date(`${registrationStartDate}T${registrationStartTime}:00`).toISOString() : null,
-            registration_end: isRegistrationRequired && registrationEndDate && registrationEndTime ? new Date(`${registrationEndDate}T${registrationEndTime}:00`).toISOString() : null
+            registration_end: isRegistrationRequired && registrationEndDate && registrationEndTime ? new Date(`${registrationEndDate}T${registrationEndTime}:00`).toISOString() : null,
+            room: roomId && roomId !== "none" ? Number(roomId) : null
           })
         });
       } else {
@@ -416,6 +473,31 @@ export default function ActivityForm() {
                       />
                     </div>
                   </div>
+
+                  {scope === "internal" && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Phòng / Hội trường</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={
+                            roomId === "none"
+                              ? "Chưa xếp phòng / Chưa xác định"
+                              : rooms.find((r) => String(r.id) === roomId)?.name || "Chưa xếp phòng"
+                          }
+                          readOnly
+                          className="bg-muted cursor-default h-11"
+                        />
+                        <Button 
+                          type="button" 
+                          variant="outline" 
+                          onClick={() => setIsRoomModalOpen(true)}
+                          className="h-11 border-border/60 hover:bg-accent font-semibold"
+                        >
+                          Chọn phòng
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Scope limits */}
                   <div className="space-y-2 border-t pt-4">
@@ -695,6 +777,78 @@ export default function ActivityForm() {
           "Chọn giờ kết thúc đăng ký"
         }
       />
+
+      {/* Room Selection Dialog */}
+      <Dialog open={isRoomModalOpen} onOpenChange={setIsRoomModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display">Chọn Phòng / Hội trường</DialogTitle>
+            <DialogDescription>
+              Lịch biểu diễn ra vào {date} ({startTime} - {endTime}). Chọn một phòng trống dưới đây.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[350px] overflow-y-auto py-2 pr-1">
+            <button
+              type="button"
+              onClick={() => {
+                setRoomId("none");
+                setIsRoomModalOpen(false);
+              }}
+              className={cn(
+                "w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all hover:bg-accent",
+                roomId === "none" ? "border-primary bg-primary/5" : "border-border"
+              )}
+            >
+              <div>
+                <p className="font-semibold text-sm">-- Không xếp phòng / Chưa xác định --</p>
+                <p className="text-xs text-muted-foreground">Không gán phòng cho hoạt động này</p>
+              </div>
+            </button>
+            
+            {checkingRooms && (
+              <div className="flex justify-center py-6">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            )}
+            
+            {!checkingRooms && rooms.map((room) => {
+              const isBooked = !room.is_available;
+              const isSelected = String(room.id) === roomId;
+              return (
+                <button
+                  key={room.id}
+                  type="button"
+                  disabled={isBooked}
+                  onClick={() => {
+                    setRoomId(String(room.id));
+                    setIsRoomModalOpen(false);
+                  }}
+                  className={cn(
+                    "w-full text-left p-3 rounded-xl border flex flex-col gap-1 transition-all",
+                    isBooked 
+                      ? "bg-muted/50 border-border/40 opacity-60 cursor-not-allowed" 
+                      : "hover:bg-accent cursor-pointer",
+                    isSelected ? "border-primary bg-primary/5" : "border-border"
+                  )}
+                >
+                  <div className="flex justify-between items-center w-full">
+                    <p className="font-bold text-sm text-foreground">{room.name}</p>
+                    <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full font-semibold">
+                      {room.capacity} chỗ
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{room.location}</p>
+                  {isBooked && (
+                    <div className="mt-1 text-[11px] text-destructive bg-destructive/10 px-2 py-1 rounded border border-destructive/20 font-medium">
+                      Bận: {room.conflict_info?.title} ({room.conflict_info?.time})
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

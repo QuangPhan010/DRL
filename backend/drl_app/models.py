@@ -40,21 +40,48 @@ class User(AbstractUser):
     def roles(self):
         roles_list = [self.role]
         
-        # Auto-grant class_monitor role if student is Lớp trưởng or Lớp phó
-        if hasattr(self, 'student_profile') and self.student_profile:
-            has_monitor_pos = StudentClassPosition.objects.filter(
-                student=self.student_profile,
-                position__name__in=['Lớp trưởng', 'Lớp phó']
-            ).exists()
+        # Check if student_profile is prefetched or exists
+        student = None
+        if 'student_profile' in self.__dict__:
+            student = self.student_profile
+        else:
+            try:
+                student = self.student_profile
+            except AttributeError:
+                pass
+            except User.student_profile.RelatedObjectDoesNotExist:
+                pass
+
+        if student:
+            # Check if student positions are prefetched
+            prefetched_positions = getattr(student, '_prefetched_objects_cache', {}).get('positions')
+            if prefetched_positions is not None:
+                has_monitor_pos = any(
+                    getattr(pos, 'position', None) and getattr(pos.position, 'name', '') in ['Lớp trưởng', 'Lớp phó']
+                    for pos in prefetched_positions
+                )
+            else:
+                has_monitor_pos = StudentClassPosition.objects.filter(
+                    student=student,
+                    position__name__in=['Lớp trưởng', 'Lớp phó']
+                ).exists()
             if has_monitor_pos and 'class_monitor' not in roles_list:
                 roles_list.append('class_monitor')
                 if 'student' not in roles_list:
                     roles_list.append('student')
 
+        # Check if user_organizations is prefetched
+        prefetched_orgs = getattr(self, '_prefetched_objects_cache', {}).get('user_organizations')
+        if prefetched_orgs is not None:
+            has_orgs = len(prefetched_orgs) > 0
+        else:
+            has_orgs = self.user_organizations.exists()
+
+        if has_orgs and 'organizer' not in roles_list:
+            roles_list.append('organizer')
+
         if self.role == 'class_monitor' and 'student' not in roles_list:
             roles_list.append('student')
-        if self.user_organizations.exists() and 'organizer' not in roles_list:
-            roles_list.append('organizer')
         return roles_list
 
     class Meta:
@@ -227,6 +254,7 @@ class Evaluation(models.Model):
     reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_evaluations')
     review_note = models.TextField(blank=True, null=True)
     class_confirmed = models.BooleanField(default=False)
+    version = models.IntegerField(default=1)
 
     class Meta:
         db_table = 'evaluation'
@@ -284,11 +312,23 @@ class EvaluationDetail(models.Model):
         db_table = 'evaluation_detail'
         unique_together = ('evaluation', 'sub_item')
 
+class Room(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    capacity = models.PositiveIntegerField(default=50)
+    location = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        db_table = 'room'
+
+    def __str__(self):
+        return f"{self.name} ({self.capacity} chỗ)"
+
 class Activity(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     points = models.IntegerField()
     criterion = models.ForeignKey(Criterion, on_delete=models.CASCADE, related_name='activities')
+    room = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, related_name='activities')
     date = models.DateField()
     organizer = models.CharField(max_length=255)
     status = models.CharField(max_length=20, choices=(('upcoming', 'Upcoming'), ('completed', 'Completed')), default='upcoming')
@@ -589,6 +629,51 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Notification {self.id} for {self.user.username}"
+
+
+class ReportDefinition(models.Model):
+    code = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default='')
+    module = models.CharField(max_length=100)
+    category = models.CharField(max_length=100)
+    permission_required = models.CharField(max_length=100) # e.g. admin, student_affairs, advisor, etc.
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'report_definition'
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class ReportJob(models.Model):
+    STATUS_CHOICES = (
+        ('PENDING', 'Pending'),
+        ('RUNNING', 'Running'),
+        ('SUCCESS', 'Success'),
+        ('FAILED', 'Failed'),
+    )
+    report_definition = models.ForeignKey(ReportDefinition, on_delete=models.PROTECT, related_name='jobs')
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='report_jobs')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    parameters = models.JSONField(default=dict, blank=True)
+    result_count = models.IntegerField(default=0)
+    file_name = models.CharField(max_length=255, blank=True, default='')
+    file_path = models.CharField(max_length=255, blank=True, default='')
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'report_job'
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f"Job #{self.id} - {self.report_definition.name} ({self.status})"
 
 
 

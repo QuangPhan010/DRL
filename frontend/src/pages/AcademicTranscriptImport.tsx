@@ -13,7 +13,10 @@ import {
   RefreshCw,
   Search,
   UploadCloud,
+  ListChecks,
+  X,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { API_URL } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +28,9 @@ import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { parseClassName } from "@/lib/filter-utils";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 type MatchStatus = "MATCHED" | "NOT_FOUND" | "CLASS_MISMATCH" | "DUPLICATE" | string;
 type SchoolClass = { id: number; name: string; faculty?: string; cohort?: string };
@@ -184,6 +190,82 @@ export default function AcademicTranscriptImport() {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<number | null>(null);
   const [isImportingAsync, setIsImportingAsync] = useState(false);
+
+  // Attendance tab states
+  const [activeTab, setActiveTab] = useState("transcript");
+  const [activities, setActivities] = useState<any[]>([]);
+  const [selectedActivityId, setSelectedActivityId] = useState("");
+  const [attendanceText, setAttendanceText] = useState("");
+  const [importingAttendance, setImportingAttendance] = useState(false);
+  const [excelFileName, setExcelFileName] = useState("");
+
+  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setExcelFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const sheetName = wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json<any>(evt.target?.result ? ws : ws, { header: 1 });
+
+        if (data.length === 0) {
+          toast.error("File excel trống.");
+          return;
+        }
+
+        let headerIndex = -1;
+        let mssvColIndex = -1;
+        const requiredIdTerms = ['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien', 'mssv', 'mã số sinh viên', 'ma so sinh vien'];
+
+        for (let r = 0; r < Math.min(data.length, 10); r++) {
+          const row = data[r];
+          if (!row || !Array.isArray(row)) continue;
+          for (let c = 0; c < row.length; c++) {
+            const cellVal = String(row[c] || "").trim().toLowerCase();
+            if (requiredIdTerms.some(term => cellVal.includes(term))) {
+              headerIndex = r;
+              mssvColIndex = c;
+              break;
+            }
+          }
+          if (mssvColIndex !== -1) break;
+        }
+
+        if (mssvColIndex === -1) {
+          toast.warning("Không tìm thấy cột mã sinh viên bằng tiêu đề. Đang đọc cột đầu tiên.");
+          mssvColIndex = 0;
+          headerIndex = -1;
+        }
+
+        const codes: string[] = [];
+        for (let r = headerIndex + 1; r < data.length; r++) {
+          const row = data[r];
+          if (!row) continue;
+          const val = String(row[mssvColIndex] || "").trim();
+          if (val && val !== "undefined" && val.length > 2) {
+            codes.push(val);
+          }
+        }
+
+        if (codes.length === 0) {
+          toast.error("Không tìm thấy mã sinh viên nào trong file.");
+        } else {
+          setAttendanceText(codes.join("\n"));
+          toast.success(`Đã đọc ${codes.length} mã sinh viên từ file Excel.`);
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error("Lỗi khi đọc file Excel.");
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<"student_code" | "full_name" | "gpa" | "classification" | "match_status">("student_code");
   const [page, setPage] = useState(1);
@@ -536,24 +618,156 @@ export default function AcademicTranscriptImport() {
     setSelectedFile(null);
   };
 
-  if (!activeClass) {
-    return (
-      <div className="flex flex-col gap-6 pb-4">
-        {/* Header */}
-        <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg shrink-0">
-          <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 20% 20%, white 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
-          <div className="relative p-5 md:p-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-white/60 text-[10px] uppercase tracking-[0.2em]">Nhập bảng điểm PDF</p>
-              <h1 className="mt-1 font-display text-xl md:text-2xl font-bold">Nhập điểm từ PDF</h1>
-              <p className="mt-1 text-white/70 text-xs max-w-2xl">Vui lòng chọn thông tin học vụ (năm học, học kỳ) và chọn lớp học từ danh sách để bắt đầu nhập điểm.</p>
-            </div>
-            <div className="flex flex-wrap gap-2 shrink-0">
-              <Badge className="bg-white/10 text-white border-white/15 text-xs py-1 px-2.5">ITC Point System</Badge>
+  useEffect(() => {
+    if (activeTab === "attendance") {
+      const fetchActivities = async () => {
+        try {
+          const token = localStorage.getItem("drl_token");
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const res = await fetch(`${API_URL}/activities/`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            setActivities(data || []);
+          }
+        } catch (err) {
+          console.error("Lỗi lấy danh sách hoạt động:", err);
+          toast.error("Không thể tải danh sách hoạt động.");
+        }
+      };
+      fetchActivities();
+    }
+  }, [activeTab]);
+
+  const handleImportAttendance = async () => {
+    if (!selectedActivityId) {
+      toast.error("Vui lòng chọn một hoạt động để điểm danh.");
+      return;
+    }
+    const studentCodes = attendanceText
+      .split(/[\n,;\t]+/)
+      .map((c) => c.trim())
+      .filter((c) => c.length > 0);
+      
+    if (studentCodes.length === 0) {
+      toast.error("Vui lòng nhập ít nhất một mã sinh viên.");
+      return;
+    }
+    
+    try {
+      setImportingAttendance(true);
+      const token = localStorage.getItem("drl_token");
+      const headers = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      };
+      const res = await fetch(`${API_URL}/activities/${selectedActivityId}/import-attendance/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ student_codes: studentCodes })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(data.message || "Điểm danh thành công!");
+        setAttendanceText("");
+        if (data.failed_codes && data.failed_codes.length > 0) {
+          toast.warning(`Không tìm thấy các MSSV: ${data.failed_codes.join(", ")}`);
+        }
+      } else {
+        toast.error(data.error || "Gặp lỗi khi nhập danh sách điểm danh.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi kết nối máy chủ.");
+    } finally {
+      setImportingAttendance(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4 pb-4">
+      <style>{`
+        @keyframes tabFadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(12px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-tab-content {
+          animation: tabFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+      `}</style>
+      {/* Header Banner */}
+      <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg shrink-0">
+        <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 20% 20%, white 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
+        <div className="relative p-4 md:p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            {activeClass && activeTab === "transcript" && (
+              <Button
+                variant="outline"
+                size="icon"
+                className="bg-white/10 text-white border-white/20 hover:bg-white/20 h-10 w-10 rounded-full shrink-0"
+                onClick={handleBackToClasses}
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            )}
+            <div>
+              <p className="text-white/60 text-[10px] uppercase tracking-[0.2em] flex items-center gap-1.5">
+                <BookOpen className="h-3 w-3" /> Nhập dữ liệu {activeClass && activeTab === "transcript" ? `• ${activeClass.name}` : ""}
+              </p>
+              <h1 className="font-display text-lg md:text-xl font-bold mt-0.5">
+                {activeClass && activeTab === "transcript" ? `Cổng nhập dữ liệu lớp ${activeClass.name}` : "Cổng nhập dữ liệu"}
+              </h1>
+              <p className="text-white/70 text-xs mt-0.5">
+                {activeTab === "transcript" 
+                  ? "Tải lên bảng điểm học tập PDF hoặc nhập danh sách điểm danh chuyên cần/đi học của sinh viên."
+                  : "Nhập danh sách mã sinh viên đi học đầy đủ để ghi nhận chuyên cần."}
+              </p>
             </div>
           </div>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <Badge className="bg-white/10 text-white border-white/15 text-xs py-1 px-2.5">
+              {activeClass && activeTab === "transcript" ? `${semester} (${schoolYear})` : "ITC Point System"}
+            </Badge>
+          </div>
         </div>
+      </div>
 
+      {/* Custom Styled Tab Navigation */}
+      <div className="flex border border-border/60 bg-muted/30 p-1 rounded-xl max-w-md w-full shrink-0">
+        <button
+          onClick={() => setActiveTab("transcript")}
+          className={cn(
+            "flex-1 py-2 text-[10px] sm:text-xs font-semibold rounded-lg transition-all duration-200",
+            activeTab === "transcript"
+              ? "bg-background text-primary shadow-sm border border-border/10 font-bold"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/10"
+          )}
+        >
+          Nhập điểm sinh viên
+        </button>
+        <button
+          onClick={() => setActiveTab("attendance")}
+          className={cn(
+            "flex-1 py-2 text-[10px] sm:text-xs font-semibold rounded-lg transition-all duration-200",
+            activeTab === "attendance"
+              ? "bg-background text-primary shadow-sm border border-border/10 font-bold"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/10"
+          )}
+        >
+          Nhập danh sách điểm danh đi học
+        </button>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+
+        <TabsContent value="transcript" className="mt-2 animate-tab-content">
+          {!activeClass ? (
+            <div className="flex flex-col gap-6 pb-4">
         {/* Filter Bar */}
         <Card className="border-0 shadow-sm shrink-0 bg-background/50 backdrop-blur">
           <CardContent className="p-4 flex flex-col md:grid md:grid-cols-6 gap-3 items-end">
@@ -678,40 +892,9 @@ export default function AcademicTranscriptImport() {
           )}
         </div>
       </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-4 pb-4">
-      {/* Header Banner */}
-      <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg shrink-0">
-        <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 20% 20%, white 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
-        <div className="relative p-4 md:p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="outline"
-              size="icon"
-              className="bg-white/10 text-white border-white/20 hover:bg-white/20 h-10 w-10 rounded-full shrink-0"
-              onClick={handleBackToClasses}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <div>
-              <p className="text-white/60 text-[10px] uppercase tracking-[0.2em] flex items-center gap-1.5">
-                <BookOpen className="h-3 w-3" /> Nhập bảng điểm PDF • {activeClass.name}
-              </p>
-              <h1 className="font-display text-lg md:text-xl font-bold mt-0.5">Tải lên bảng điểm lớp {activeClass.name}</h1>
-              <p className="text-white/70 text-xs mt-0.5">Upload file PDF text, hệ thống tự động đối chiếu MSSV, TBCTK và lưu lịch sử import.</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 shrink-0">
-            <Badge className="bg-white/10 text-white border-white/15 text-xs py-1 px-2.5">{semester} ({schoolYear})</Badge>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Grid */}
-      <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
+    ) : (
+      <div className="grid gap-4 lg:grid-cols-[320px_1fr] xl:grid-cols-[380px_1fr]">
+        {/* Main Grid */}
         {/* Left Column */}
         <div className="space-y-4">
           {/* Upload PDF Card */}
@@ -908,8 +1091,117 @@ export default function AcademicTranscriptImport() {
               )}
             </CardContent>
           </Card>
+          </div>
         </div>
-      </div>
+      )}
+        </TabsContent>
+
+        <TabsContent value="attendance" className="mt-2 animate-tab-content">
+          <div className="grid gap-4 lg:grid-cols-[380px_1fr] xl:grid-cols-[450px_1fr]">
+            {/* Left Card: Select Activity & Textarea */}
+            <Card className="border-0 shadow-md">
+              <CardHeader className="pb-3">
+                <CardTitle className="font-display flex items-center gap-2">
+                  <ListChecks className="h-5 w-5 text-primary" />
+                  Nhập danh sách điểm danh đi học
+                </CardTitle>
+                <CardDescription>
+                  Chọn môn học / hoạt động và nhập danh sách MSSV đi học đầy đủ để ghi nhận chuyên cần.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="activity-select" className="text-sm font-semibold">Chọn Môn học / Hoạt động *</Label>
+                  <Select value={selectedActivityId} onValueChange={setSelectedActivityId}>
+                    <SelectTrigger id="activity-select" className="bg-background">
+                      <SelectValue placeholder="-- Chọn môn học / hoạt động --" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activities.map((act) => (
+                        <SelectItem key={act.id} value={String(act.id)}>
+                          {act.title} (+{act.points}đ)
+                        </SelectItem>
+                      ))}
+                      {activities.length === 0 && (
+                        <SelectItem value="none" disabled>Không có môn học / hoạt động nào khả dụng</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="excel-file" className="text-sm font-semibold">Tải file điểm danh (.xlsx, .xls) hoặc nhập dưới đây</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="excel-file"
+                      type="file"
+                      accept=".xlsx, .xls"
+                      onChange={handleExcelUpload}
+                      className="cursor-pointer bg-background"
+                    />
+                    {excelFileName && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          setExcelFileName("");
+                          setAttendanceText("");
+                          const input = document.getElementById("excel-file") as HTMLInputElement;
+                          if (input) input.value = "";
+                        }}
+                        title="Xóa file"
+                      >
+                        <X className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="mssv-list" className="text-sm font-semibold">Danh sách MSSV đi học / tham gia</Label>
+                  <Textarea
+                    id="mssv-list"
+                    rows={6}
+                    placeholder="Nhập mã sinh viên hoặc tải file excel ở trên (mỗi mã 1 dòng hoặc cách nhau bằng dấu phẩy)"
+                    value={attendanceText}
+                    onChange={(e) => setAttendanceText(e.target.value)}
+                    className="font-mono text-xs bg-background"
+                  />
+                </div>
+
+                <Button 
+                  onClick={handleImportAttendance} 
+                  disabled={importingAttendance || !selectedActivityId}
+                  className="w-full gap-2 bg-gradient-primary"
+                >
+                  {importingAttendance ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Xác nhận điểm danh đi học
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Right Card: Guidelines / Instructions */}
+            <Card className="border-0 shadow-md">
+              <CardHeader>
+                <CardTitle className="font-display">Hướng dẫn sử dụng</CardTitle>
+                <CardDescription>Các bước nhập danh sách điểm danh đi học / chuyên cần của sinh viên.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-muted-foreground leading-relaxed">
+                <p>1. <strong>Chọn môn học / hoạt động</strong> cần nhập điểm danh đi học trong danh sách bên trái.</p>
+                <p>2. <strong>Sao chép cột MSSV</strong> đi học đầy đủ từ Excel, bảng điểm danh PDF hoặc file ghi nhận lớp học, sau đó dán vào khung nhập liệu.</p>
+                <p>3. Nhấn nút <strong>“Xác nhận điểm danh đi học”</strong> để gửi danh sách lên hệ thống.</p>
+                <p>4. Hệ thống sẽ quét, khớp mã sinh viên, đăng ký tham gia lớp học/hoạt động đó và cập nhật trạng thái điểm danh đi học thành <strong>“Đã tham gia” (attended)</strong> để ghi nhận tích lũy chuyên cần rèn luyện.</p>
+                <p className="bg-amber-500/10 border border-amber-500/20 text-amber-700 p-3 rounded-xl text-xs flex items-start gap-2 mt-4">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                  <span>
+                    <strong>Chú ý:</strong> Nếu MSSV không tồn tại trong hệ thống, hệ thống sẽ bỏ qua và hiển thị cảnh báo danh sách các MSSV không hợp lệ sau khi quá trình hoàn tất.
+                  </span>
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
       {isImportingAsync && (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md border shadow-2xl bg-gradient-card">

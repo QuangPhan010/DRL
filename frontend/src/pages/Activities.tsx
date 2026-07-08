@@ -682,8 +682,8 @@ export default function Activities() {
 
       <Tabs defaultValue="internal" className="w-full">
         <TabsList className="grid w-full max-w-[400px] grid-cols-2">
-          <TabsTrigger value="internal">Hoạt động trong trường</TabsTrigger>
-          <TabsTrigger value="external">Hoạt động ngoài trường</TabsTrigger>
+          <TabsTrigger value="internal" className="text-[11px] sm:text-sm px-1.5 py-1">Hoạt động trong trường</TabsTrigger>
+          <TabsTrigger value="external" className="text-[11px] sm:text-sm px-1.5 py-1">Hoạt động ngoài trường</TabsTrigger>
         </TabsList>
 
         <TabsContent value="internal" className="space-y-6 mt-6">

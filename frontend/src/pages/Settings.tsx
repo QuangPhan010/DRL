@@ -288,14 +288,14 @@ export default function SettingsPage() {
 
       <Tabs defaultValue="general" className="w-full space-y-6">
         <TabsList className="bg-muted/60 p-1 w-full max-w-lg grid grid-cols-3">
-          <TabsTrigger value="general" className="gap-2">
-            <SettingsIcon className="h-4 w-4" /> Cài đặt chung
+          <TabsTrigger value="general" className="gap-1 px-1 text-[10px] sm:text-sm">
+            <SettingsIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> Cài đặt chung
           </TabsTrigger>
-          <TabsTrigger value="scale" className="gap-2">
-            <Award className="h-4 w-4" /> Thang điểm xếp loại
+          <TabsTrigger value="scale" className="gap-1 px-1 text-[10px] sm:text-sm">
+            <Award className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> Thang điểm
           </TabsTrigger>
-          <TabsTrigger value="accounts" className="gap-2">
-            <Shield className="h-4 w-4" /> Tài khoản & Phân quyền
+          <TabsTrigger value="accounts" className="gap-1 px-1 text-[10px] sm:text-sm">
+            <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> Tài khoản & Quyền
           </TabsTrigger>
         </TabsList>
 

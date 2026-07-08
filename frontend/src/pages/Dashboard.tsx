@@ -42,6 +42,25 @@ const COLORS = [
 ];
 
 export default function Dashboard() {
+  const getCurrentAcademicYear = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    return month >= 8 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+  };
+
+  const getCurrentSemester = () => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    if (month >= 8 && month <= 12) {
+      return "HK1";
+    } else if (month >= 1 && month <= 4) {
+      return "HK2";
+    } else {
+      return "HK3";
+    }
+  };
+
   const { user } = useAuth();
   const navigate = useNavigate();
   const [evals, setEvals] = useState<any[]>([]);
@@ -50,6 +69,31 @@ export default function Dashboard() {
   const [studentsCount, setStudentsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+
+  const [activeSemester, setActiveSemester] = useState(getCurrentSemester());
+  const [activeYear, setActiveYear] = useState(getCurrentAcademicYear());
+
+  useEffect(() => {
+    const fetchActivePeriod = async () => {
+      try {
+        const token = localStorage.getItem("drl_token");
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await fetch(`${API_URL}/criteria-sets/`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          const active = data.find((item: any) => item.is_active);
+          if (active) {
+            setActiveSemester(active.semester);
+            setActiveYear(active.academic_year);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchActivePeriod();
+  }, []);
 
   const fetchDashboardData = async () => {
     try {
@@ -229,7 +273,7 @@ export default function Dashboard() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-5">
           <div>
             <h1 className="font-display text-3xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              Xin chào, {user?.fullName ? user.fullName.split(" ").slice(-1)[0] : "Bạn"} 👋
+              Xin chào, {user?.fullName ? user.fullName.split(" ").slice(-1)[0] : "Bạn"}
             </h1>
             <p className="text-muted-foreground mt-1 text-sm md:text-base">
               Chào mừng quay trở lại. Hãy theo dõi điểm số rèn luyện và tiến trình tiêu chí của bạn dưới đây.
@@ -237,7 +281,7 @@ export default function Dashboard() {
           </div>
           <Badge variant="outline" className="px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-muted/40 border-border/50 text-xs font-semibold text-foreground/80 shadow-sm">
             <Calendar className="h-3.5 w-3.5 text-primary" />
-            Học kỳ hiện tại: HK1 2024-2025
+            Học kỳ hiện tại: {activeSemester} {activeYear}
           </Badge>
         </div>
 
@@ -536,7 +580,7 @@ export default function Dashboard() {
         </div>
         <Badge variant="outline" className="px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-muted/40 border-border/50 text-xs font-semibold text-foreground/80 shadow-sm">
           <Calendar className="h-3.5 w-3.5 text-primary" />
-          Học kỳ hiện tại: HK1 2024-2025
+          Học kỳ hiện tại: {activeSemester} {activeYear}
         </Badge>
       </div>
 

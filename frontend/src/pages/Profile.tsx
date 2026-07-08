@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import Loading from "./Loading";
 
 interface StudentDetail {
   id: string;
@@ -166,6 +167,8 @@ export default function Profile() {
     }
   };
 
+  const [avatarLoading, setAvatarLoading] = useState(false);
+
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -176,7 +179,7 @@ export default function Profile() {
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64String = reader.result as string;
-        const loadingToast = toast.loading("Đang tải ảnh lên và xác thực khuôn mặt...");
+        setAvatarLoading(true);
         try {
           const token = localStorage.getItem("drl_token");
           const response = await fetch(`${API_URL}/users/${user?.id}/`, {
@@ -194,13 +197,13 @@ export default function Profile() {
             throw new Error(errData.error || "Không thể lưu ảnh đại diện lên máy chủ.");
           }
           updateProfileContext({ avatar: base64String });
-          toast.success("Cập nhật ảnh đại diện Face ID thành công!", { id: loadingToast });
+          toast.success("Cập nhật ảnh đại diện Face ID thành công!");
         } catch (error) {
           toast.error(
-            error instanceof Error ? error.message : "Đã xảy ra lỗi khi tải ảnh đại diện.",
-            { id: loadingToast },
+            error instanceof Error ? error.message : "Đã xảy ra lỗi khi tải ảnh đại diện."
           );
         } finally {
+          setAvatarLoading(false);
           e.target.value = "";
         }
       };
@@ -269,6 +272,9 @@ export default function Profile() {
   };
 
   if (!user) return null;
+  if (avatarLoading) {
+    return <Loading message="Đang tải ảnh lên và xác thực khuôn mặt..." />;
+  }
   const initials = user.fullName.split(" ").slice(-2).map(n => n[0]).join("") ?? "U";
 
   const getStatusBadge = (status: string) => {
@@ -354,9 +360,9 @@ export default function Profile() {
         <div className="md:col-span-2">
           <Tabs defaultValue="info" className="w-full">
             <TabsList className="grid w-full grid-cols-3 bg-muted/50 p-1 rounded-xl">
-              <TabsTrigger value="info" className="rounded-lg">Thông tin chi tiết</TabsTrigger>
-              <TabsTrigger value="activities" disabled={!studentInfo} className="rounded-lg">Hoạt động ({myActivities.length})</TabsTrigger>
-              <TabsTrigger value="password" className="rounded-lg">Đổi mật khẩu</TabsTrigger>
+              <TabsTrigger value="info" className="rounded-lg text-[10px] sm:text-sm px-1">Thông tin chi tiết</TabsTrigger>
+              <TabsTrigger value="activities" disabled={!studentInfo} className="rounded-lg text-[10px] sm:text-sm px-1">Hoạt động ({myActivities.length})</TabsTrigger>
+              <TabsTrigger value="password" className="rounded-lg text-[10px] sm:text-sm px-1">Đổi mật khẩu</TabsTrigger>
             </TabsList>
 
             <TabsContent value="info" className="mt-4">
