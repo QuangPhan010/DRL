@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileCheck, Settings, GraduationCap, User as UserIcon, Sparkles,
-  CalendarDays, ClipboardCheck, ShieldAlert, Award, Clock, FileUp, ListChecks, Building2, FileText
+  CalendarDays, ClipboardCheck, ShieldAlert, Award, Clock, FileUp, ListChecks, Building2, FileText,
+  ChevronDown, Home
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -27,17 +28,21 @@ const navItems: NavItem[] = [
   { title: "Rà soát lớp", url: "/class-review", icon: ClipboardCheck, roles: ["class_monitor"] },
   { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "student_affairs", "admin"] },
 
-  // 4. Quản lý hoạt động & Tổ chức
+  // 4. Quản lý hoạt động
   { title: "Quản lý hoạt động", url: "/activities", icon: CalendarDays, roles: ["student", "organizer", "class_monitor", "advisor", "student_affairs", "admin"] },
-  { title: "Đơn vị tổ chức", url: "/organizations", icon: Building2, roles: ["admin", "student_affairs", "organizer"] },
 
   // 5. Nhập & Đồng bộ điểm học tập (Dữ liệu học lực)
   { title: "Nhập dữ liệu", url: "/academic-transcript-import", icon: FileUp, roles: ["academic_affairs", "admin"] },
 
-  // 6. Quản lý lớp, sinh viên & cấu hình hệ thống
-  { title: "Quản lý lớp & SV", url: "/classes", icon: GraduationCap, roles: ["admin", "advisor", "student_affairs", "academic_affairs"] },
+  // 6. Báo cáo & cấu hình
   { title: "Báo cáo", url: "/reports", icon: FileText, roles: ["admin", "advisor", "student_affairs", "academic_affairs", "class_monitor"] },
   { title: "Cấu hình hệ thống", url: "/settings", icon: Settings, roles: ["admin"] },
+];
+
+const managementItems: NavItem[] = [
+  { title: "Quản lý đơn vị", url: "/organizations", icon: Building2, roles: ["admin", "student_affairs", "organizer"] },
+  { title: "Quản lý phòng", url: "/rooms", icon: Home, roles: ["admin", "student_affairs", "organizer", "advisor"] },
+  { title: "Quản lý lớp & SV", url: "/classes", icon: GraduationCap, roles: ["admin", "advisor", "student_affairs", "academic_affairs"] },
 ];
 
 function SystemClock({ collapsed }: { collapsed: boolean }) {
@@ -89,7 +94,16 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const { pathname } = useLocation();
   const { user } = useAuth();
+  
+  // Set expanded by default if currently visiting any management URL
+  const isCurrentlyInManagement = pathname.startsWith("/organizations") || pathname.startsWith("/rooms") || pathname.startsWith("/classes");
+  const [isManagementExpanded, setIsManagementExpanded] = useState(isCurrentlyInManagement);
 
+  useEffect(() => {
+    if (isCurrentlyInManagement) {
+      setIsManagementExpanded(true);
+    }
+  }, [pathname, isCurrentlyInManagement]);
 
   const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const items = navItems
@@ -100,6 +114,11 @@ export function AppSidebar() {
       }
       return i;
     });
+
+  const allowedManagementItems = managementItems.filter(
+    i => user && i.roles.some(r => userRoles.includes(r))
+  );
+
   const isActive = (url: string) => url === "/" ? pathname === "/" : pathname.startsWith(url);
 
   return (
@@ -134,6 +153,44 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+
+              {allowedManagementItems.length > 0 && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton 
+                    onClick={() => setIsManagementExpanded(!isManagementExpanded)}
+                    className={cn(
+                      "h-10 w-full flex items-center justify-between hover:bg-sidebar-accent data-[active=true]:bg-sidebar-primary/20 data-[active=true]:text-sidebar-primary-foreground data-[active=true]:font-medium",
+                      isCurrentlyInManagement && "bg-sidebar-accent/50 text-primary"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      {!collapsed && <span>Quản lý</span>}
+                    </div>
+                    {!collapsed && (
+                      <ChevronDown className={cn("h-4 w-4 transition-transform duration-200", isManagementExpanded ? "rotate-180" : "")} />
+                    )}
+                  </SidebarMenuButton>
+                  
+                  {isManagementExpanded && !collapsed && (
+                    <div className="pl-4 mt-1 flex flex-col gap-1 border-l border-sidebar-border ml-4">
+                      {allowedManagementItems.map((subItem) => (
+                        <SidebarMenuButton 
+                          key={subItem.url} 
+                          asChild 
+                          isActive={isActive(subItem.url)} 
+                          className="h-9 data-[active=true]:bg-sidebar-primary/20 data-[active=true]:text-sidebar-primary-foreground data-[active=true]:font-medium hover:bg-sidebar-accent"
+                        >
+                          <NavLink to={subItem.url}>
+                            <subItem.icon className="h-3.5 w-3.5" />
+                            <span className="text-xs">{subItem.title}</span>
+                          </NavLink>
+                        </SidebarMenuButton>
+                      ))}
+                    </div>
+                  )}
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

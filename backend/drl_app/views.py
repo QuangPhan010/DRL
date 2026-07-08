@@ -470,6 +470,14 @@ class RoomViewSet(viewsets.ModelViewSet):
     serializer_class = RoomSerializer
     permission_classes = [permissions.AllowAny]
 
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            class IsAdminUserRole(permissions.BasePermission):
+                def has_permission(self, request, view):
+                    return request.user.is_authenticated and request.user.role == 'admin'
+            return [IsAdminUserRole()]
+        return [permissions.AllowAny()]
+
     @action(detail=False, methods=['post'], url_path='check-availability')
     def check_availability(self, request):
         date_str = request.data.get('date')
@@ -1826,6 +1834,14 @@ class ActivityViewSet(viewsets.ModelViewSet):
     serializer_class = ActivitySerializer
     permission_classes = [permissions.AllowAny]
 
+    def get_queryset(self):
+        queryset = Activity.objects.all()
+        is_external_param = self.request.query_params.get('is_external')
+        if is_external_param is not None:
+            is_external_bool = is_external_param.lower() == 'true'
+            queryset = queryset.filter(is_external=is_external_bool)
+        return queryset
+
     @action(
         detail=True,
         methods=['get'],
@@ -2531,10 +2547,11 @@ class ExternalActivityViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        if user.is_authenticated and hasattr(user, 'student_profile'):
+        if 'student' in serializer.validated_data:
+            serializer.save()
+        elif user.is_authenticated and hasattr(user, 'student_profile') and user.student_profile:
             serializer.save(student=user.student_profile)
         else:
-            # For testing/mocking when user might not have a student profile
             first_student = Student.objects.first()
             serializer.save(student=first_student)
 

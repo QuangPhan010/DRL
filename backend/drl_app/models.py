@@ -331,6 +331,8 @@ class Activity(models.Model):
     room = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, related_name='activities')
     date = models.DateField()
     organizer = models.CharField(max_length=255)
+    is_external = models.BooleanField(default=False)
+    location = models.CharField(max_length=255, blank=True, null=True)
     status = models.CharField(max_length=20, choices=(('upcoming', 'Upcoming'), ('completed', 'Completed')), default='upcoming')
     latitude = models.DecimalField(max_digits=9, decimal_places=6, default=10.850100)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, default=106.771200)

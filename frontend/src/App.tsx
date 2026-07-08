@@ -28,6 +28,7 @@ const Organizations = lazy(() => import("./pages/Organizations"));
 const Reports = lazy(() => import("./pages/Reports")); // Reporting Center Page
 const ErrorPage = lazy(() => import("./pages/ErrorPage"));
 const EmailPreview = lazy(() => import("./pages/EmailPreview"));
+const Rooms = lazy(() => import("./pages/Rooms"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -60,6 +61,7 @@ const App = () => (
                 <Route path="/academic-transcript-import" element={<AcademicTranscriptImport />} />
                 <Route path="/evaluation-sessions/create" element={<EvaluationSession />} />
                 <Route path="/organizations" element={<Organizations />} />
+                <Route path="/rooms" element={<Rooms />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/email-preview" element={<EmailPreview />} />

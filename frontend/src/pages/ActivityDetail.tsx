@@ -778,13 +778,7 @@ export default function ActivityDetail() {
                     </>
                   )}
 
-                  {!userRoles.includes("student") && (
-                    <>
-                      <Button variant="outline" className="w-full gap-2 border-primary/20 text-primary" onClick={() => setIsQrOpen(true)}>
-                        <QrCode className="h-4 w-4" /> Hiển thị mã QR điểm danh
-                      </Button>
-                    </>
-                  )}
+
                 </div>
               </CardContent>
             </Card>
@@ -851,27 +845,7 @@ export default function ActivityDetail() {
         </div>
       </div>
 
-      {/* Dialog: QR code */}
-      <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>
-        <DialogContent className="max-w-xs text-center">
-          <DialogHeader>
-            <DialogTitle className="font-display text-center">Mã QR Điểm Danh</DialogTitle>
-            <DialogDescription className="text-center">Hãy đưa mã này cho sinh viên quét để check-in/out.</DialogDescription>
-          </DialogHeader>
-          <div className="py-6 flex flex-col items-center gap-4">
-            <div className="border p-3 rounded-2xl bg-white shadow-inner">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.origin + '/activities/' + (activity?.id || ''))}`}
-                alt="QR code"
-                className="h-44 w-44 object-contain"
-              />
-            </div>
-            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
-              Hoạt động: {isExternal ? activity?.activity_name : activity?.title}
-            </Badge>
-          </div>
-        </DialogContent>
-      </Dialog>
+
 
       {/* Dialog: Review form */}
       <Dialog open={isReviewOpen} onOpenChange={setIsReviewOpen}>

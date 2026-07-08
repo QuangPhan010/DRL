@@ -118,7 +118,7 @@ export default function EmailPreview() {
 
     <div style="background-color: #eff6ff; border-radius: 8px; padding: 14px 18px; border: 1px solid #dbeafe; margin-top: 24px;">
       <p style="color: #1e40af; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
-        * Nhắc nhở: Hãy có mặt đúng giờ và quét mã QR Code để Check-in khi bắt đầu, Check-out khi kết thúc hoạt động nhằm tích lũy điểm rèn luyện.
+        * Nhắc nhở: Hãy có mặt đúng giờ và thực hiện điểm danh Check-in khi bắt đầu, Check-out khi kết thúc hoạt động nhằm tích lũy điểm rèn luyện.
       </p>
     </div>
   </div>

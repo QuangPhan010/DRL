@@ -14,7 +14,6 @@ import { mockActivities, mockCriteria, Activity, mockStudents } from "@/lib/mock
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import ExternalActivities from "./ExternalActivities";
 import FaceVerificationCamera, { FaceVerificationData } from "@/components/FaceVerificationCamera";
 import { getFreshAttendanceLocation, GpsPosition } from "@/lib/geolocation";
 import { cn } from "@/lib/utils";
@@ -25,6 +24,7 @@ export default function Activities() {
   const { user } = useAuth();
   const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [activeTab, setActiveTab] = useState<"internal" | "external">("internal");
 
   const parseDateTime = (dateStr?: string, timeStr?: string) => {
     if (!dateStr || !timeStr) return null;
@@ -198,6 +198,7 @@ export default function Activities() {
           is_registration_required: act.is_registration_required,
           registration_start: act.registration_start,
           registration_end: act.registration_end,
+          is_external: act.is_external,
           participants: (act.participants || []).map((p: any) => ({
             studentId: p.student_id || p.student.toString(),
             fullName: p.student_name,
@@ -635,6 +636,9 @@ export default function Activities() {
 
   const filteredActivities = useMemo(() => {
     return activities.filter((act) => {
+      const matchesTab = activeTab === "external" ? !!act.is_external : !act.is_external;
+      if (!matchesTab) return false;
+
       if (selectedOrgType === "all") return true;
       const organizerName = act.organizer?.trim() || "";
       const matchedOrg = orgList.find(
@@ -658,7 +662,7 @@ export default function Activities() {
       }
       return !nameLower.includes("đoàn") && !nameLower.includes("hội") && !nameLower.includes("khoa") && !nameLower.includes("clb") && !nameLower.includes("câu lạc bộ") && !nameLower.includes("phòng") && !nameLower.includes("ban");
     });
-  }, [activities, selectedOrgType, orgList]);
+  }, [activities, selectedOrgType, orgList, activeTab]);
 
   return (
     <div className="space-y-6">
@@ -680,192 +684,183 @@ export default function Activities() {
         )}
       </div>
 
-      <Tabs defaultValue="internal" className="w-full">
+      <Tabs value={activeTab} onValueChange={(val: any) => { setActiveTab(val); setSelectedOrgType("all"); }} className="w-full">
         <TabsList className="grid w-full max-w-[400px] grid-cols-2">
           <TabsTrigger value="internal" className="text-[11px] sm:text-sm px-1.5 py-1">Hoạt động trong trường</TabsTrigger>
           <TabsTrigger value="external" className="text-[11px] sm:text-sm px-1.5 py-1">Hoạt động ngoài trường</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="internal" className="space-y-6 mt-6">
-          {/* Filter & Highlight Bar */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-muted/20 rounded-xl border border-muted-foreground/10">
-            {/* Sub-tabs for Organizer Types */}
-            <div className="flex flex-wrap gap-2">
-              {["all", "Đoàn - Hội", "Khoa", "CLB", "Phòng/Ban", "Khác"].map((type) => (
-                <Button
-                  key={type}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedOrgType(type)}
-                  className={cn(
-                    "h-8 text-xs rounded-lg transition-all px-3 border",
-                    selectedOrgType === type 
-                      ? "bg-primary text-white font-medium shadow hover:bg-primary/95 hover:text-white border-transparent" 
-                      : "text-foreground bg-background border-border/80 hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  {type === "all" ? "Tất cả đơn vị" : type}
-                </Button>
-              ))}
-            </div>
-
-            {/* Highlight Dropdown */}
-            <div className="flex items-center gap-2">
-              <Label className="text-xs text-muted-foreground whitespace-nowrap font-medium">Highlight tổ chức:</Label>
-              <Select value={highlightedOrganizer} onValueChange={setHighlightedOrganizer}>
-                <SelectTrigger className="w-[200px] h-8 text-xs bg-background">
-                  <SelectValue placeholder="Chọn đơn vị" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tất cả đơn vị (Không highlight)</SelectItem>
-                  {uniqueOrganizers.map((orgName) => (
-                    <SelectItem key={orgName} value={orgName}>
-                      {orgName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredActivities.map(act => {
-              const isRegistered = act.participants.some(p => p.studentId === user?.studentId);
-              const studentStatus = act.participants.find(p => p.studentId === user?.studentId)?.status;
-              const criterion = criteria.find(c => c.id === act.criterionId);
-
-              const start = parseDateTime(act.date, act.start_time);
-              const end = parseDateTime(act.date, act.end_time);
-              const now = new Date();
-              const isOngoing = act.status !== "completed" && start && end && now >= start && now <= end;
-              const isEnded = act.status !== "completed" && end && now > end;
-
-              const organizerName = act.organizer?.trim() || "Chưa xác định";
-              const organizerStyle = getOrganizerStyle(organizerName);
-              const isHighlighted = highlightedOrganizer === "all" || highlightedOrganizer === organizerName;
-
-              return (
-                <Card
-                  key={act.id}
-                  className={cn(
-                    "border-0 shadow-md bg-gradient-card flex flex-col justify-between transition-all duration-300",
-                    highlightedOrganizer !== "all" && !isHighlighted && "opacity-35 grayscale scale-95",
-                    highlightedOrganizer !== "all" && isHighlighted && "ring-2 ring-primary bg-primary/5"
-                  )}
-                >
-                  <CardHeader>
-                    <div className="flex justify-between items-start gap-2">
-                      <Badge className="bg-primary/10 text-primary border-primary/20">{criterion?.name || "Tiêu chí"}</Badge>
-                      {act.status === "completed" ? (
-                        <Badge variant="secondary" className="bg-success/15 text-success hover:bg-success/20 border-0">
-                          Đã hoàn thành
-                        </Badge>
-                      ) : isOngoing ? (
-                        <Badge variant="default" className="bg-orange-500/15 text-orange-500 hover:bg-orange-500/20 border-0">
-                          Đang diễn ra
-                        </Badge>
-                      ) : isEnded ? (
-                        <Badge variant="default" className="bg-red-500/15 text-red-500 hover:bg-red-500/20 border-0">
-                          Đã kết thúc
-                        </Badge>
-                      ) : (
-                        <Badge variant="default" className="bg-warning/15 text-warning hover:bg-warning/20 border-0 text-black dark:text-white">
-                          Sắp diễn ra
-                        </Badge>
-                      )}
-                    </div>
-                    <CardTitle className="font-display text-lg font-bold mt-3 leading-snug line-clamp-2 cursor-pointer hover:text-primary transition-colors flex items-center justify-between gap-1.5" onClick={() => navigate(`/activities/${act.id}`)}>
-                      <span>{act.title}</span>
-                      <Eye className="h-4 w-4 opacity-50 shrink-0 hover:opacity-100" />
-                    </CardTitle>
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      <Badge variant="outline" className={cn("text-[10px] font-medium py-0.5 px-2", organizerStyle.badge)}>
-                        <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", organizerStyle.dot)} />
-                        {organizerName}
-                      </Badge>
-                      <Badge variant="outline" className="text-[10px] bg-muted/40 font-medium py-0.5 px-2">
-                        {act.scope_type === "class" ? "Giới hạn Lớp" : act.scope_type === "club" ? "Giới hạn CLB" : "Toàn trường"}
-                      </Badge>
-                      {act.is_registration_required && (
-                        <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-500 border-amber-500/20 font-medium py-0.5 px-2">
-                          Cần đăng ký trước
-                        </Badge>
-                      )}
-                    </div>
-                    <CardDescription className="line-clamp-3 text-sm mt-2">{act.description}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4 pt-0">
-                    <div className="flex justify-between items-center text-xs border-t pt-3">
-                      <div>
-                        <span className="text-muted-foreground block">Thời gian diễn ra</span>
-                        <span className="font-medium">
-                          {act.date} {act.start_time && `(${act.start_time.substring(0, 5)} - ${act.end_time?.substring(0, 5)})`}
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-muted-foreground block">Điểm đề xuất</span>
-                        <span className="font-bold text-primary text-sm">+{act.points} điểm</span>
-                      </div>
-                    </div>
-
-                    <div className="border-t pt-3 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Users className="h-3.5 w-3.5" />
-                        <span>{act.participants.length} người đăng ký</span>
-                      </div>
-
-                      {userRoles.includes("student") && (
-                        <div className="flex flex-wrap gap-2">
-                          {!isRegistered && act.status === "upcoming" && act.is_registration_required && (
-                            <Button size="sm" onClick={() => registerActivity(act.id)}>Đăng ký</Button>
-                          )}
-                          {/* Check-in/out buttons hidden here - handled inside detail page */}
-                          {studentStatus === "attended" && (
-                            <Badge variant="outline" className="bg-success/5 text-success">Đã tham gia</Badge>
-                          )}
-                          {studentStatus === "evidence_submitted" && (
-                            <Badge variant="outline" className="bg-warning/5 text-warning">Đã nộp minh chứng</Badge>
-                          )}
-                          {act.status === "completed" && studentStatus !== "attended" && studentStatus !== "evidence_submitted" && (
-                            <Button size="sm" variant="outline" className="gap-1 border-primary/30 text-primary" onClick={() => { setSelectedActivity(act); setIsEvidenceOpen(true); }}>
-                              <Upload className="h-3 w-3" /> Nộp minh chứng
-                            </Button>
-                          )}
-                        </div>
-                      )}
-
-                      {!userRoles.includes("student") && (
-                        <div className="flex flex-wrap gap-2 w-full justify-between items-center mt-2">
-                          <div className="flex gap-1.5">
-                            <Button size="xs" variant="outline" className="gap-1 border-primary/20 text-primary h-8 px-2" onClick={() => { setSelectedActivity(act); setIsQrOpen(true); }}>
-                              <QrCode className="h-3.5 w-3.5" /> Mã QR
-                            </Button>
-                            <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
-                              Danh sách ({act.participants.length})
-                            </Button>
-                          </div>
-                          <div className="flex gap-1.5">
-                            <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => navigate(`/activities/${act.id}/edit`)}>
-                              Sửa
-                            </Button>
-                            <Button size="xs" className="h-8 px-2 text-red-600 border border-red-200 bg-transparent hover:bg-red-50 hover:text-red-700 transition-colors" onClick={() => handleDeleteActivity(act.id)}>
-                              Xóa
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="external" className="mt-6">
-          <ExternalActivities />
-        </TabsContent>
       </Tabs>
+
+      {/* Filter & Highlight Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-muted/20 rounded-xl border border-muted-foreground/10 mt-6">
+        {/* Sub-tabs for Organizer Types */}
+        <div className="flex flex-wrap gap-2">
+          {["all", "Đoàn - Hội", "Khoa", "CLB", "Phòng/Ban", "Khác"].map((type) => (
+            <Button
+              key={type}
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedOrgType(type)}
+              className={cn(
+                "h-8 text-xs rounded-lg transition-all px-3 border",
+                selectedOrgType === type 
+                  ? "bg-primary text-white font-medium shadow hover:bg-primary/95 hover:text-white border-transparent" 
+                  : "text-foreground bg-background border-border/80 hover:bg-muted hover:text-foreground"
+              )}
+            >
+              {type === "all" ? "Tất cả đơn vị" : type}
+            </Button>
+          ))}
+        </div>
+
+        {/* Highlight Dropdown */}
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap font-medium">Highlight tổ chức:</Label>
+          <Select value={highlightedOrganizer} onValueChange={setHighlightedOrganizer}>
+            <SelectTrigger className="w-[200px] h-8 text-xs bg-background">
+              <SelectValue placeholder="Chọn đơn vị" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tất cả đơn vị (Không highlight)</SelectItem>
+              {uniqueOrganizers.map((orgName) => (
+                <SelectItem key={orgName} value={orgName}>
+                  {orgName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredActivities.map(act => {
+          const isRegistered = act.participants.some(p => p.studentId === user?.studentId);
+          const studentStatus = act.participants.find(p => p.studentId === user?.studentId)?.status;
+          const criterion = criteria.find(c => c.id === act.criterionId);
+
+          const start = parseDateTime(act.date, act.start_time);
+          const end = parseDateTime(act.date, act.end_time);
+          const now = new Date();
+          const isOngoing = act.status !== "completed" && start && end && now >= start && now <= end;
+          const isEnded = act.status !== "completed" && end && now > end;
+
+          const organizerName = act.organizer?.trim() || "Chưa xác định";
+          const organizerStyle = getOrganizerStyle(organizerName);
+          const isHighlighted = highlightedOrganizer === "all" || highlightedOrganizer === organizerName;
+
+          return (
+            <Card
+              key={act.id}
+              className={cn(
+                "border-0 shadow-md bg-gradient-card flex flex-col justify-between transition-all duration-300",
+                highlightedOrganizer !== "all" && !isHighlighted && "opacity-35 grayscale scale-95",
+                highlightedOrganizer !== "all" && isHighlighted && "ring-2 ring-primary bg-primary/5"
+              )}
+            >
+              <CardHeader>
+                <div className="flex justify-between items-start gap-2">
+                  <Badge className="bg-primary/10 text-primary border-primary/20">{criterion?.name || "Tiêu chí"}</Badge>
+                  {act.status === "completed" ? (
+                    <Badge variant="secondary" className="bg-success/15 text-success hover:bg-success/20 border-0">
+                      Đã hoàn thành
+                    </Badge>
+                  ) : isOngoing ? (
+                    <Badge variant="default" className="bg-orange-500/15 text-orange-500 hover:bg-orange-500/20 border-0">
+                      Đang diễn ra
+                    </Badge>
+                  ) : isEnded ? (
+                    <Badge variant="default" className="bg-red-500/15 text-red-500 hover:bg-red-500/20 border-0">
+                      Đã kết thúc
+                    </Badge>
+                  ) : (
+                    <Badge variant="default" className="bg-warning/15 text-warning hover:bg-warning/20 border-0 text-black dark:text-white">
+                      Sắp diễn ra
+                    </Badge>
+                  )}
+                </div>
+                <CardTitle className="font-display text-lg font-bold mt-3 leading-snug line-clamp-2 cursor-pointer hover:text-primary transition-colors flex items-center justify-between gap-1.5" onClick={() => navigate(`/activities/${act.id}`)}>
+                  <span>{act.title}</span>
+                  <Eye className="h-4 w-4 opacity-50 shrink-0 hover:opacity-100" />
+                </CardTitle>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <Badge variant="outline" className={cn("text-[10px] font-medium py-0.5 px-2", organizerStyle.badge)}>
+                    <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", organizerStyle.dot)} />
+                    {organizerName}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] bg-muted/40 font-medium py-0.5 px-2">
+                    {act.scope_type === "class" ? "Giới hạn Lớp" : act.scope_type === "club" ? "Giới hạn CLB" : "Toàn trường"}
+                  </Badge>
+                  {act.is_registration_required && (
+                    <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-500 border-amber-500/20 font-medium py-0.5 px-2">
+                      Cần đăng ký trước
+                    </Badge>
+                  )}
+                </div>
+                <CardDescription className="line-clamp-3 text-sm mt-2">{act.description}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-0">
+                <div className="flex justify-between items-center text-xs border-t pt-3">
+                  <div>
+                    <span className="text-muted-foreground block">Thời gian diễn ra</span>
+                    <span className="font-medium">
+                      {act.date} {act.start_time && `(${act.start_time.substring(0, 5)} - ${act.end_time?.substring(0, 5)})`}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-muted-foreground block">Điểm đề xuất</span>
+                    <span className="font-bold text-primary text-sm">+{act.points} điểm</span>
+                  </div>
+                </div>
+
+                <div className="border-t pt-3 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Users className="h-3.5 w-3.5" />
+                    <span>{act.participants.length} người đăng ký</span>
+                  </div>
+
+                  {userRoles.includes("student") && (
+                    <div className="flex flex-wrap gap-2">
+                      {!isRegistered && act.status === "upcoming" && act.is_registration_required && (
+                        <Button size="sm" onClick={() => registerActivity(act.id)}>Đăng ký</Button>
+                      )}
+                      {/* Check-in/out buttons hidden here - handled inside detail page */}
+                      {studentStatus === "attended" && (
+                        <Badge variant="outline" className="bg-success/5 text-success">Đã tham gia</Badge>
+                      )}
+                      {studentStatus === "evidence_submitted" && (
+                        <Badge variant="outline" className="bg-warning/5 text-warning">Đã nộp minh chứng</Badge>
+                      )}
+                      {act.status === "completed" && studentStatus !== "attended" && studentStatus !== "evidence_submitted" && (
+                        <Button size="sm" variant="outline" className="gap-1 border-primary/30 text-primary" onClick={() => { setSelectedActivity(act); setIsEvidenceOpen(true); }}>
+                          <Upload className="h-3 w-3" /> Nộp minh chứng
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  {!userRoles.includes("student") && (
+                    <div className="flex flex-wrap gap-2 w-full justify-between items-center mt-2">
+                      <div className="flex gap-1.5">
+                        <Button size="xs" variant="outline" className="gap-1 border-primary/20 h-8 px-2" onClick={() => { setSelectedActivity(act); setIsParticipantsOpen(true); }}>
+                          Danh sách ({act.participants.length})
+                        </Button>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Button size="xs" className="h-8 px-2 text-amber-600 border border-amber-300 bg-transparent hover:bg-amber-50 hover:text-amber-700 transition-colors" onClick={() => navigate(`/activities/${act.id}/edit`)}>
+                          Sửa
+                        </Button>
+                        <Button size="xs" className="h-8 px-2 text-red-600 border border-red-200 bg-transparent hover:bg-red-50 hover:text-red-700 transition-colors" onClick={() => handleDeleteActivity(act.id)}>
+                          Xóa
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
 
 
       {/* Dialog: Create Activity */}

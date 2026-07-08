@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { API_URL } from "@/contexts/AuthContext";
+import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { RadialTimePicker } from "./Activities";
 import { OrganizerPicker } from "@/components/OrganizerPicker";
@@ -26,7 +26,7 @@ export default function ActivityForm() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEditing = !!id;
-
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [criteria, setCriteria] = useState<any[]>([]);
 
@@ -128,6 +128,8 @@ export default function ActivityForm() {
             setSelectedClubs(act.allowed_clubs || []);
             setIsRegistrationRequired(!!act.is_registration_required);
             setRoomId(act.room ? String(act.room) : "none");
+            setScope(act.is_external ? "external" : "internal");
+            setLocation(act.location || "");
 
             const toLocalDateAndTime = (isoString?: string) => {
               if (!isoString) return { date: getLocalToday(), time: "08:00" };
@@ -226,65 +228,44 @@ export default function ActivityForm() {
         return diffMins;
       };
 
-      let res;
-      if (scope === "internal") {
-        const url = isEditing
-          ? `${API_URL}/activities/${id}/`
-          : `${API_URL}/activities/`;
-        const method = isEditing ? "PUT" : "POST";
-        res = await fetch(url, {
-          method,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title,
-            description,
-            points: Number(points),
-            criterion: Number(criterionId.replace(/\D/g, "")) || 3,
-            date,
-            organizer: organizerName.trim(),
-            status: "upcoming",
-            latitude: 10.850100,
-            longitude: 106.771200,
-            radius_meters: 100,
-            duration_minutes: calculateDuration(startTime, endTime),
-            max_participants: Number(maxParticipants),
-            start_time: startTime ? `${startTime}:00` : null,
-            end_time: endTime ? `${endTime}:00` : null,
-            scope_type: scopeType,
-            allowed_classes: scopeType === "class" ? selectedClasses : [],
-            allowed_clubs: scopeType === "club" ? selectedClubs : [],
-            is_registration_required: isRegistrationRequired,
-            registration_start: isRegistrationRequired && registrationStartDate && registrationStartTime ? new Date(`${registrationStartDate}T${registrationStartTime}:00`).toISOString() : null,
-            registration_end: isRegistrationRequired && registrationEndDate && registrationEndTime ? new Date(`${registrationEndDate}T${registrationEndTime}:00`).toISOString() : null,
-            room: roomId && roomId !== "none" ? Number(roomId) : null
-          })
-        });
-      } else {
-        const url = isEditing
-          ? `${API_URL}/external-activities/${id}/`
-          : `${API_URL}/external-activities/`;
-        const method = isEditing ? "PUT" : "POST";
-        const token = localStorage.getItem("drl_token");
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (token) {
-          headers["Authorization"] = `Bearer ${token}`;
-        }
-        res = await fetch(url, {
-          method,
-          headers,
-          body: JSON.stringify({
-            activity_name: title,
-            organizer_name: organizerName,
-            start_date: date,
-            end_date: endDate,
-            location,
-            activity_type: activityType,
-            proposed_score: Number(points),
-            description,
-            status: "draft"
-          })
-        });
-      }
+      const url = isEditing
+        ? `${API_URL}/activities/${id}/`
+        : `${API_URL}/activities/`;
+      const method = isEditing ? "PUT" : "POST";
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      };
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: JSON.stringify({
+          title,
+          description,
+          points: Number(points),
+          criterion: Number(criterionId.replace(/\D/g, "")) || 3,
+          date,
+          organizer: organizerName.trim(),
+          status: "upcoming",
+          latitude: 10.850100,
+          longitude: 106.771200,
+          radius_meters: 100,
+          duration_minutes: calculateDuration(startTime, endTime),
+          max_participants: Number(maxParticipants),
+          start_time: startTime ? `${startTime}:00` : null,
+          end_time: endTime ? `${endTime}:00` : null,
+          scope_type: scopeType,
+          allowed_classes: scopeType === "class" ? selectedClasses : [],
+          allowed_clubs: scopeType === "club" ? selectedClubs : [],
+          is_registration_required: isRegistrationRequired,
+          registration_start: isRegistrationRequired && registrationStartDate && registrationStartTime ? new Date(`${registrationStartDate}T${registrationStartTime}:00`).toISOString() : null,
+          registration_end: isRegistrationRequired && registrationEndDate && registrationEndTime ? new Date(`${registrationEndDate}T${registrationEndTime}:00`).toISOString() : null,
+          room: roomId && roomId !== "none" ? Number(roomId) : null,
+          is_external: scope === "external",
+          location: scope === "external" ? location : ""
+        })
+      });
 
       if (res.ok) {
         toast.success(isEditing ? "Đã cập nhật hoạt động thành công!" : "Đã tạo hoạt động thành công!");
@@ -732,6 +713,24 @@ export default function ActivityForm() {
                   <div className="space-y-2">
                     <Label htmlFor="description">Mô tả / Ghi chú</Label>
                     <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Mô tả chi tiết nội dung tham gia..." />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="maxParticipants">Số người được đăng ký tối đa</Label>
+                    <Input
+                      id="maxParticipants"
+                      type="number"
+                      value={maxParticipants}
+                      onChange={(e) => setMaxParticipants(e.target.value)}
+                      required
+                      min={Math.max(1, registeredCount)}
+                      step="1"
+                    />
+                    {isEditing && (
+                      <p className="text-xs text-muted-foreground">
+                        Hiện có {registeredCount} sinh viên đăng ký. Bạn có thể tăng hoặc giảm giới hạn,
+                        nhưng không thấp hơn số đã đăng ký.
+                      </p>
+                    )}
                   </div>
                 </>
               )}
