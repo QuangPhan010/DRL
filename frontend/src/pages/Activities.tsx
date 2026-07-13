@@ -703,8 +703,8 @@ export default function Activities() {
               onClick={() => setSelectedOrgType(type)}
               className={cn(
                 "h-8 text-xs rounded-lg transition-all px-3 border",
-                selectedOrgType === type 
-                  ? "bg-primary text-white font-medium shadow hover:bg-primary/95 hover:text-white border-transparent" 
+                selectedOrgType === type
+                  ? "bg-primary text-white font-medium shadow hover:bg-primary/95 hover:text-white border-transparent"
                   : "text-foreground bg-background border-border/80 hover:bg-muted hover:text-foreground"
               )}
             >
@@ -1208,11 +1208,6 @@ export default function Activities() {
                   <p className="text-sm font-semibold">Tình trạng: {selectedActivity.status === "completed" ? "Đã hoàn thành" : "Sắp diễn ra"}</p>
                   <p className="text-xs text-muted-foreground">{selectedActivity.participants.length} sinh viên tham gia</p>
                 </div>
-                {selectedActivity.status === "upcoming" && !userRoles.includes("student") && (
-                  <Button size="sm" onClick={() => approvePoints(selectedActivity.id)} className="bg-success hover:bg-success/90 gap-1">
-                    <Check className="h-4 w-4" /> Hoàn thành & Đề xuất điểm
-                  </Button>
-                )}
               </div>
 
               <Table>
@@ -1222,7 +1217,6 @@ export default function Activities() {
                     <TableHead>Họ và tên</TableHead>
                     <TableHead>Lớp</TableHead>
                     <TableHead>Trạng thái</TableHead>
-                    <TableHead className="text-right">Thao tác</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1239,18 +1233,6 @@ export default function Activities() {
                             <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Minh chứng đã nộp</Badge>
                             {p.evidenceUrl && <a href={p.evidenceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary underline truncate max-w-[120px]">Xem file</a>}
                           </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {p.status === "evidence_submitted" && !userRoles.includes("student") && (
-                          <Button size="xs" onClick={() => confirmAttended(selectedActivity.id, p.studentId)} className="bg-success text-white hover:bg-success/90 text-xs px-2 py-1 h-7">
-                            Xác nhận điểm
-                          </Button>
-                        )}
-                        {p.status === "registered" && !userRoles.includes("student") && (
-                          <Button size="xs" onClick={() => confirmAttended(selectedActivity.id, p.studentId)} className="bg-primary text-white hover:bg-primary/90 text-xs px-2 py-1 h-7">
-                            Điểm danh
-                          </Button>
                         )}
                       </TableCell>
                     </TableRow>

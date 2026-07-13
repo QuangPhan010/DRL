@@ -41,8 +41,8 @@ class Command(BaseCommand):
         semester = active_set.semester
         year = active_set.academic_year
 
-        # Gửi nhắc nhở nộp phiếu tự đánh giá cho sinh viên trước 3 ngày và trước 1 ngày
-        if days_left in [1, 3]:
+        # Gửi nhắc nhở nộp phiếu tự đánh giá cho sinh viên trước 1, 2 hoặc 3 ngày
+        if days_left in [1, 2, 3]:
             # Tìm tất cả sinh viên
             students = Student.objects.all()
             for student in students:
@@ -66,6 +66,61 @@ class Command(BaseCommand):
                         level='warning',
                         action_url='/'
                     )
+                    if student.email and days_left in [1, 2]:
+                        try:
+                            from django.core.mail import send_mail
+                            from django.conf import settings
+                            email_subject = f"[ITC Point] Nhắc nhở: Còn {days_left} ngày hạn chót tự chấm điểm rèn luyện"
+                            email_message = f"Chào {student.full_name},\n\nHạn chót tự chấm điểm rèn luyện HK{semester} {year} của bạn là ngày {val}.\nVui lòng đăng nhập hệ thống và nộp phiếu tự chấm trước thời hạn.\n\n* Lưu ý: Nếu quá hạn, bạn sẽ nhận điểm 0 rèn luyện cho học kỳ này."
+                            email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #f59e0b, #d97706); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800;">Sắp Hết Hạn Tự Chấm Điểm</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Còn lại {days_left} ngày để hoàn thành</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700;">Chào {student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px;">Hệ thống nhắc nhở: Bạn chưa nộp phiếu tự đánh giá điểm rèn luyện cho học kỳ này. Vui lòng thực hiện tự chấm điểm rèn luyện cá nhân trước hạn chót:</p>
+    
+    <div style="background-color: #fdf2f8; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #fce7f3; border-left: 4px solid #ef4444;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 150px; text-transform: uppercase;">Học kỳ / Năm học:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">HK{semester} - Năm học {year}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Hạn cuối nộp:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #ef4444; font-weight: 700;">{val}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 36px 0 28px 0;">
+      <a href="http://localhost:8080/" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3);">Bắt đầu tự chấm điểm</a>
+    </div>
+
+    <div style="background-color: #fef2f2; border-radius: 8px; padding: 14px 18px; border: 1px solid #fee2e2;">
+      <p style="color: #b91c1c; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+        * Lưu ý quan trọng: Sinh viên không hoàn thành tự chấm điểm đúng hạn sẽ nhận điểm 0 rèn luyện cho học kỳ này.
+      </p>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                            send_mail(
+                                email_subject,
+                                email_message,
+                                getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                                [student.email],
+                                fail_silently=True,
+                                html_message=email_html
+                            )
+                        except Exception as e:
+                            self.stdout.write(self.style.ERROR(f"Error sending email to {student.student_id}: {e}"))
             self.stdout.write(self.style.SUCCESS(f"Đã gửi nhắc nhở nộp phiếu tự chấm cho sinh viên."))
 
         # Nhắc nhở duyệt phiếu cho lớp trưởng & cố vấn nếu gần đến hạn chót (trong vòng 3 ngày)

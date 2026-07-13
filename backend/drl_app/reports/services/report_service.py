@@ -9,6 +9,7 @@ from ...models import ReportDefinition, ReportJob
 from ...services.workflow_guard import log_audit
 
 from ..queries.evaluation_queries import EvaluationQueries
+from ..queries.activity_queries import ActivityQueries
 from ..exporters.excel_exporter import ExcelExporter
 from ..exporters.pdf_exporter import PdfExporter
 
@@ -54,6 +55,24 @@ def async_run_report_job(job_id):
         if code in ('evaluation_summary', 'evaluation_detail'):
             query_runner = EvaluationQueries()
             data = query_runner.execute(parameters)
+        elif code == 'activity_summary':
+            query_runner = ActivityQueries()
+            data = query_runner.execute(parameters)
+        elif code == 'audit_report':
+            from drl_app.models import AuditLog
+            audit_logs = AuditLog.objects.all().select_related('user').order_by('-created_at')
+            data = []
+            for log in audit_logs:
+                data.append({
+                    'created_at': log.created_at.strftime('%H:%M:%S %d/%m/%Y') if log.created_at else '',
+                    'username': log.user.username if log.user else 'Hệ thống',
+                    'role': log.user.role if log.user else '',
+                    'action': log.action,
+                    'entity_name': log.entity_name,
+                    'before_value': log.before_value or '',
+                    'after_value': log.after_value or '',
+                    'ip_address': log.ip_address or '',
+                })
         else:
             # Fallback or other reports return empty list for now
             data = []

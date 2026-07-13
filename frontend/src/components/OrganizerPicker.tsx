@@ -64,15 +64,27 @@ export function OrganizerPicker({
     return () => window.removeEventListener("organizations-updated", refresh);
   }, []);
 
-  const selectedExists = useMemo(
-    () => organizations.some(item => item.name === value),
+  const exactMatchedName = useMemo(
+    () => {
+      console.log("OrganizerPicker diagnostic - value:", value);
+      console.log("OrganizerPicker diagnostic - organizations:", organizations);
+      const found = organizations.find(item => item.name.trim().toLowerCase() === value?.trim().toLowerCase());
+      console.log("OrganizerPicker diagnostic - found:", found);
+      return found ? found.name : "";
+    },
     [organizations, value],
   );
 
+  const selectedExists = !!exactMatchedName;
+
   useEffect(() => {
-    if (!loading && value && !selectedExists) {
-      setCreating(true);
-      setNewName(value);
+    if (!loading && value) {
+      if (selectedExists) {
+        setCreating(false);
+      } else {
+        setCreating(true);
+        setNewName(value);
+      }
     }
   }, [loading, selectedExists, value]);
 
@@ -117,8 +129,9 @@ export function OrganizerPicker({
         {label} {required && <span className="text-destructive">*</span>}
       </Label>
       <Select
-        value={creating ? "__new__" : (selectedExists ? value : "")}
+        value={creating ? "__new__" : (selectedExists ? exactMatchedName : "")}
         onValueChange={(nextValue) => {
+          if (!nextValue) return; // Ngăn chặn sự kiện reset tự động của Radix UI Select
           if (nextValue === "__new__") {
             setCreating(true);
             setNewName("");

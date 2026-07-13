@@ -73,6 +73,14 @@ export default function ActivityDetail() {
   const [reviewComment, setReviewComment] = useState("");
   const [isSoldierCardOpen, setIsSoldierCardOpen] = useState(false);
 
+  // Evidence states
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+  const [evidenceUrl, setEvidenceUrl] = useState("");
+  const [isSubmitEvidenceLoading, setIsSubmitEvidenceLoading] = useState(false);
+  const [isRejectOpen, setIsRejectOpen] = useState(false);
+  const [rejectingStudentId, setRejectingStudentId] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+
   // Internal activity simulation states
   const [isCheckInSimOpen, setIsCheckInSimOpen] = useState(false);
   const [isCheckOutSimOpen, setIsCheckOutSimOpen] = useState(false);
@@ -97,6 +105,102 @@ export default function ActivityDetail() {
       setGpsPosition(null);
     }
   }, [isCheckInSimOpen, isCheckOutSimOpen]);
+
+  const handleEvidenceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!evidenceUrl) return;
+    try {
+      setIsSubmitEvidenceLoading(true);
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_URL}/activities/${id}/submit-evidence/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          student_id: user?.studentId,
+          evidenceUrl: evidenceUrl
+        })
+      });
+      if (res.ok) {
+        toast.success("Nộp minh chứng thành công!");
+        setIsEvidenceOpen(false);
+        setEvidenceUrl("");
+        fetchDetail();
+      } else {
+        const errData = await res.json();
+        toast.error(errData.error || "Nộp minh chứng thất bại.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi kết nối.");
+    } finally {
+      setIsSubmitEvidenceLoading(false);
+    }
+  };
+
+  const handleApproveEvidence = async (studentId: string) => {
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_URL}/activities/${id}/confirm-attended/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ student_id: studentId })
+      });
+      if (res.ok) {
+        toast.success("Đã phê duyệt minh chứng!");
+        fetchDetail();
+      } else {
+        toast.error("Phê duyệt thất bại.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi kết nối.");
+    }
+  };
+
+  const handleRejectEvidence = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_URL}/activities/${id}/reject-evidence/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          student_id: rejectingStudentId,
+          comment: rejectReason
+        })
+      });
+      if (res.ok) {
+        toast.success("Đã từ chối minh chứng!");
+        setIsRejectOpen(false);
+        setRejectingStudentId("");
+        setRejectReason("");
+        fetchDetail();
+      } else {
+        toast.error("Từ chối thất bại.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Lỗi kết nối.");
+    }
+  };
 
   const fetchDetail = async () => {
     try {
@@ -588,7 +692,12 @@ export default function ActivityDetail() {
                   <MapPin className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                   <div>
                     <span className="text-xs text-muted-foreground block">Địa điểm</span>
-                    <span className="font-semibold">{activity.location || (isExternal ? "N/A" : "Trường Cao đẳng Công nghệ Thông tin TP.HCM (ITC)")}</span>
+                    <span className="font-semibold">
+                      {isExternal 
+                        ? (activity.location || "N/A")
+                        : (activity.room_detail ? `Phòng ${activity.room_detail.name}` : (activity.location || "Trường Cao đẳng Công nghệ Thông tin TP.HCM (ITC)"))
+                      }
+                    </span>
                   </div>
                 </div>
                 <div className="flex gap-2.5 items-start">
@@ -675,6 +784,7 @@ export default function ActivityDetail() {
                         <TableHead>Trạng thái</TableHead>
                         <TableHead className="text-center">Check-in Face ID</TableHead>
                         <TableHead className="text-center">Check-out Face ID</TableHead>
+                        {activity.is_external && <TableHead className="text-center">Minh chứng</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -713,6 +823,47 @@ export default function ActivityDetail() {
                                 <span className="text-muted-foreground text-xs">—</span>
                               )}
                             </TableCell>
+                            {activity.is_external && (
+                              <TableCell className="text-center">
+                                {p.evidence_url ? (
+                                  <div className="flex items-center justify-center gap-2">
+                                    <a
+                                      href={p.evidence_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-primary underline hover:text-primary-focus"
+                                    >
+                                      Xem
+                                    </a>
+                                    {p.status === "evidence_submitted" && (
+                                      <div className="flex gap-1">
+                                        <Button
+                                          size="xs"
+                                          className="bg-green-600 hover:bg-green-700 text-white p-1 h-6 w-6"
+                                          onClick={() => handleApproveEvidence(svId)}
+                                          title="Duyệt minh chứng"
+                                        >
+                                          <Check className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                          size="xs"
+                                          className="bg-red-600 hover:bg-red-700 text-white p-1 h-6 w-6"
+                                          onClick={() => {
+                                            setRejectingStudentId(svId);
+                                            setIsRejectOpen(true);
+                                          }}
+                                          title="Từ chối"
+                                        >
+                                          <XCircle className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">—</span>
+                                )}
+                              </TableCell>
+                            )}
                           </TableRow>
                         );
                       })}
@@ -850,8 +1001,31 @@ export default function ActivityDetail() {
                           </Button>
                         </div>
                       )}
-                      {studentStatus === "attended" && (
+                      {studentStatus === "attended" && !activity.is_external && (
                         <Badge variant="outline" className="bg-success/10 text-success p-2 justify-center w-full text-center">Bạn đã tham gia hoạt động này</Badge>
+                      )}
+                      {activity.is_external && isRegistered && (
+                        <div className="pt-2 border-t mt-2 space-y-2">
+                          {studentStatus === "evidence_submitted" && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 p-2 justify-center w-full text-center">
+                              Đã nộp minh chứng. Chờ duyệt...
+                            </Badge>
+                          )}
+                          {studentStatus === "attended" && (
+                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 p-2 justify-center w-full text-center">
+                              Đã tham gia (Đã duyệt minh chứng)
+                            </Badge>
+                          )}
+                          {studentStatus !== "evidence_submitted" && studentStatus !== "attended" && (
+                            <Button
+                              type="button"
+                              className="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold flex items-center justify-center gap-1.5"
+                              onClick={() => setIsEvidenceOpen(true)}
+                            >
+                              📁 Nộp minh chứng hoạt động
+                            </Button>
+                          )}
+                        </div>
                       )}
                       {activity.is_soldier_card_enabled && isRegistered && (
                         <Button
@@ -1068,6 +1242,61 @@ export default function ActivityDetail() {
               <Download className="h-5 w-5" /> Tải thẻ chiến sĩ (PNG)
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Submit Evidence */}
+      <Dialog open={isEvidenceOpen} onOpenChange={setIsEvidenceOpen}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle className="font-display">Nộp minh chứng hoạt động</DialogTitle>
+            <DialogDescription>Nhập liên kết chứa hình ảnh hoặc tài liệu minh chứng của bạn.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEvidenceSubmit} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="evidenceUrl">Đường dẫn minh chứng (URL Drive/Ảnh/Tài liệu) <span className="text-destructive">*</span></Label>
+              <Input
+                id="evidenceUrl"
+                value={evidenceUrl}
+                onChange={e => setEvidenceUrl(e.target.value)}
+                required
+                placeholder="https://drive.google.com/..."
+              />
+            </div>
+            <DialogFooter className="border-t pt-4">
+              <Button type="button" variant="outline" onClick={() => setIsEvidenceOpen(false)}>Hủy</Button>
+              <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white" disabled={isSubmitEvidenceLoading}>
+                {isSubmitEvidenceLoading ? "Đang gửi..." : "Xác nhận nộp"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Reject Evidence Comment */}
+      <Dialog open={isRejectOpen} onOpenChange={setIsRejectOpen}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle className="font-display">Từ chối minh chứng</DialogTitle>
+            <DialogDescription>Nhập lý do từ chối để gửi thông báo cho sinh viên.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleRejectEvidence} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="rejectReason">Lý do từ chối <span className="text-destructive">*</span></Label>
+              <Textarea
+                id="rejectReason"
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                required
+                placeholder="Ví dụ: Minh chứng bị mờ, không khớp thông tin..."
+                rows={3}
+              />
+            </div>
+            <DialogFooter className="border-t pt-4">
+              <Button type="button" variant="outline" onClick={() => { setIsRejectOpen(false); setRejectingStudentId(""); setRejectReason(""); }}>Hủy</Button>
+              <Button type="submit" className="bg-red-600 hover:bg-red-700 text-white">Xác nhận từ chối</Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

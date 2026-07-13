@@ -99,6 +99,128 @@ class PdfExporter:
             alignment=1 # Center
         )
         
+        is_audit = len(data) > 0 and 'username' in data[0] and 'action' in data[0]
+
+        if is_audit:
+            story.append(Paragraph("BÁO CÁO VẾT HỆ THỐNG (AUDIT LOG)", title_style))
+            story.append(Paragraph("Nhật ký chi tiết các thao tác, truy cập và thay đổi cấu hình", sub_style))
+            story.append(Spacer(1, 10))
+            
+            audit_headers = [
+                Paragraph("STT", header_style),
+                Paragraph("Ngày giờ", header_style),
+                Paragraph("Tài khoản", header_style),
+                Paragraph("Vai trò", header_style),
+                Paragraph("Thao tác", header_style),
+                Paragraph("Đối tượng", header_style),
+                Paragraph("Giá trị trước", header_style),
+                Paragraph("Giá trị sau", header_style),
+                Paragraph("Địa chỉ IP", header_style)
+            ]
+            
+            audit_table_data = [audit_headers]
+            
+            for idx, item in enumerate(data, 1):
+                row = [
+                    Paragraph(str(idx), cell_center_style),
+                    Paragraph(item.get('created_at', ''), cell_center_style),
+                    Paragraph(item.get('username', ''), cell_style),
+                    Paragraph(item.get('role', ''), cell_center_style),
+                    Paragraph(item.get('action', ''), cell_style),
+                    Paragraph(item.get('entity_name', ''), cell_style),
+                    Paragraph(item.get('before_value', '')[:50] + ('...' if len(item.get('before_value', '')) > 50 else ''), cell_style),
+                    Paragraph(item.get('after_value', '')[:50] + ('...' if len(item.get('after_value', '')) > 50 else ''), cell_style),
+                    Paragraph(item.get('ip_address', ''), cell_center_style)
+                ]
+                audit_table_data.append(row)
+                
+            col_widths = [25, 100, 70, 55, 100, 75, 110, 110, 77]
+            t = Table(audit_table_data, colWidths=col_widths, repeatRows=1)
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BOTTOMPADDING', (0,0), (-1,0), 6),
+                ('TOPPADDING', (0,0), (-1,0), 6),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D3D3D3')),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F9FAFB')]),
+                ('TOPPADDING', (0,1), (-1,-1), 5),
+                ('BOTTOMPADDING', (0,1), (-1,-1), 5),
+            ]))
+            story.append(t)
+            
+            doc.build(story)
+            pdf_bytes = buffer.getvalue()
+            buffer.close()
+            return pdf_bytes
+
+        is_activity = len(data) > 0 and 'activity_title' in data[0]
+
+        if is_activity:
+            from reportlab.platypus import PageBreak
+            for act_idx, act_data in enumerate(data):
+                story.append(Paragraph("BÁO CÁO CHI TIẾT HOẠT ĐỘNG NGOẠI KHÓA", title_style))
+                story.append(Paragraph(f"Hoạt động: {act_data.get('activity_title')}", ParagraphStyle(
+                    'ActTitle', parent=styles['Normal'], fontName=font_bold_name, fontSize=12, textColor=colors.HexColor('#1F497D'), spaceAfter=4
+                )))
+                story.append(Paragraph(f"Ngày tổ chức: {act_data.get('activity_date')}  |  Địa điểm: {act_data.get('activity_location')}", sub_style))
+                story.append(Spacer(1, 10))
+                
+                act_headers = [
+                    Paragraph("STT", header_style),
+                    Paragraph("MSSV", header_style),
+                    Paragraph("Họ và tên", header_style),
+                    Paragraph("Lớp", header_style),
+                    Paragraph("Khoa", header_style),
+                    Paragraph("Giờ Check-in", header_style),
+                    Paragraph("Giờ Check-out", header_style),
+                    Paragraph("Trạng thái", header_style)
+                ]
+                
+                act_table_data = [act_headers]
+                
+                for idx, p in enumerate(act_data.get('participants', []), 1):
+                    status_text = p.get('status', '')
+                    if status_text == "Đầy đủ":
+                        status_html = f'<font color="#10B981"><b>{status_text}</b></font>'
+                    else:
+                        status_html = f'<font color="#EF4444"><b>{status_text}</b></font>'
+                        
+                    row = [
+                        Paragraph(str(idx), cell_center_style),
+                        Paragraph(p.get('student_id', ''), cell_center_style),
+                        Paragraph(p.get('full_name', ''), cell_style),
+                        Paragraph(p.get('class_name', ''), cell_center_style),
+                        Paragraph(p.get('faculty', ''), cell_style),
+                        Paragraph(p.get('checkin_time', ''), cell_center_style),
+                        Paragraph(p.get('checkout_time', ''), cell_center_style),
+                        Paragraph(status_html, cell_center_style)
+                    ]
+                    act_table_data.append(row)
+                    
+                col_widths = [25, 65, 130, 65, 110, 110, 110, 77]
+                t = Table(act_table_data, colWidths=col_widths, repeatRows=1)
+                t.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')),
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                    ('BOTTOMPADDING', (0,0), (-1,0), 6),
+                    ('TOPPADDING', (0,0), (-1,0), 6),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D3D3D3')),
+                    ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F9FAFB')]),
+                    ('TOPPADDING', (0,1), (-1,-1), 5),
+                    ('BOTTOMPADDING', (0,1), (-1,-1), 5),
+                ]))
+                story.append(t)
+                
+                if act_idx < len(data) - 1:
+                    story.append(PageBreak())
+                    
+            doc.build(story)
+            pdf_bytes = buffer.getvalue()
+            buffer.close()
+            return pdf_bytes
+
         # Title & Subtitle paragraphs
         story.append(Paragraph("BÁO CÁO TỔNG HỢP ĐIỂM RÈN LUYỆN SINH VIÊN", title_style))
         

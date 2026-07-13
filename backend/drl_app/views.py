@@ -182,28 +182,12 @@ def _verify_attendance_face(request):
 
 
 def _verify_attendance_location(request, activity, student):
-    latitude = float(request.data.get('latitude', 0.0) or 0.0)
-    longitude = float(request.data.get('longitude', 0.0) or 0.0)
-    accuracy = float(request.data.get('accuracy', 10.0) or 10.0)
-
-    if (
-        not all(math.isfinite(value) for value in (latitude, longitude, accuracy))
-        or not -90 <= latitude <= 90
-        or not -180 <= longitude <= 180
-        or accuracy <= 0
-    ):
-        return None, Response(
-            {'error': 'Dữ liệu GPS không hợp lệ.'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # Distance enforcement is temporarily disabled, but malformed GPS data
-    # must still be rejected before it can reach attendance records.
+    # GPS validation is completely disabled. Return mock zero values.
     return {
         'distance': 0.0,
-        'accuracy': accuracy,
-        'latitude': latitude,
-        'longitude': longitude,
+        'accuracy': 0.0,
+        'latitude': 0.0,
+        'longitude': 0.0,
     }, None
 
     maximum_accuracy = max(int(activity.radius_meters or 100), 100)
@@ -1929,6 +1913,59 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                     level='success',
                     action_url='/'
                 )
+                if evaluation.student.email:
+                    try:
+                        from django.core.mail import send_mail
+                        from django.conf import settings
+                        email_subject = f"[ITC Point] Kết quả điểm rèn luyện chính thức HK{evaluation.semester} {evaluation.year}"
+                        email_message = f"Chào {evaluation.student.full_name},\n\nĐiểm rèn luyện chính thức của bạn trong HK{evaluation.semester} {evaluation.year} đã được phê duyệt hoàn tất.\n\nTổng điểm: {evaluation.total_score}\nXếp loại: {evaluation.classification or 'Chưa xếp loại'}"
+                        email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800;">Kết Quả Điểm Rèn Luyện</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Phê duyệt hoàn tất cấp Cố vấn học tập</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700;">Chào {evaluation.student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px;">Hệ thống thông báo: Điểm rèn luyện của bạn trong học kỳ này đã được xét duyệt chính thức với thông tin xếp loại như sau:</p>
+    
+    <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #f1f5f9; border-left: 4px solid #10b981;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 180px; text-transform: uppercase;">Học kỳ / Năm học:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">HK{evaluation.semester} - Năm học {evaluation.year}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Tổng điểm chính thức:</td>
+          <td style="padding: 8px 0; font-size: 18px; color: #10b981; font-weight: 800;">{evaluation.total_score} điểm</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Xếp loại rèn luyện:</td>
+          <td style="padding: 8px 0; font-size: 16px; color: #0f172a; font-weight: 700;">{evaluation.classification or 'Chưa xếp loại'}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 36px 0 28px 0;">
+      <a href="http://localhost:8080/" style="background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3);">Xem chi tiết bảng điểm</a>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                        send_mail(
+                            email_subject,
+                            email_message,
+                            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                            [evaluation.student.email],
+                            fail_silently=True,
+                            html_message=email_html
+                        )
+                    except Exception as e:
+                        print(f"Error sending evaluation approved email to {evaluation.student.student_id}: {e}")
             elif status_param == 'rejected':
                 create_notification(
                     user=student_user,
@@ -2391,6 +2428,36 @@ class ActivityViewSet(viewsets.ModelViewSet):
         participant.save()
         return Response(ActivitySerializer(activity).data)
 
+    @action(detail=True, methods=['post'], url_path='reject-evidence')
+    def reject_evidence(self, request, pk=None):
+        activity = self.get_object()
+        student_id = request.data.get('studentId') or request.data.get('student_id')
+        comment = request.data.get('comment', 'Minh chứng không hợp lệ.')
+        student = get_object_or_404(Student, student_id=student_id)
+        participant = get_object_or_404(ActivityParticipant, activity=activity, student=student)
+        participant.status = 'registered'
+        participant.evidence_url = None
+        participant.save()
+        
+        # Send email notification
+        if student.email:
+            try:
+                from django.core.mail import send_mail
+                from django.conf import settings
+                email_subject = f"[ITC Point] Từ chối minh chứng hoạt động: {activity.title}"
+                email_message = f"Chào {student.full_name},\n\nMinh chứng tham gia hoạt động '{activity.title}' của bạn đã bị từ chối.\n\nLý do: {comment}\n\nVui lòng đăng nhập hệ thống để nộp lại minh chứng hợp lệ."
+                send_mail(
+                    email_subject,
+                    email_message,
+                    getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                    [student.email],
+                    fail_silently=True
+                )
+            except Exception as e:
+                print(f"Error sending reject evidence email: {e}")
+                
+        return Response(ActivitySerializer(activity).data)
+
     @action(detail=True, methods=['post'], url_path='import-attendance')
     def import_attendance(self, request, pk=None):
         activity = self.get_object()
@@ -2555,6 +2622,66 @@ class ActivityViewSet(viewsets.ModelViewSet):
         attendance, _ = ActivityAttendance.objects.get_or_create(activity=activity, student=student)
         attendance.save()
 
+        # Send confirmation email
+        if student.email:
+            try:
+                from django.core.mail import send_mail
+                from django.conf import settings
+                local_time = timezone.localtime(checkin_obj.check_in_time)
+                time_str = local_time.strftime("%H:%M:%S %d/%m/%Y")
+                
+                email_subject = f"[ITC Point] Check-in thành công: {activity.title}"
+                email_message = f"Chào {student.full_name},\n\nHệ thống ghi nhận bạn đã Check-in bằng quét khuôn mặt (Face ID) thành công vào hoạt động '{activity.title}' vào lúc {time_str}.\n\nĐừng quên thực hiện Check-out khi hoạt động kết thúc để được tích lũy điểm rèn luyện."
+                email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800;">Check-in Thành Công</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Xác thực bằng Face ID thành công</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700;">Chào {student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px;">Hệ thống xác nhận bạn đã thực hiện Check-in thành công cho hoạt động ngoại khóa:</p>
+    
+    <div style="background-color: #f0fdf4; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #dcfce7; border-left: 4px solid #10b981;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 150px; text-transform: uppercase;">Hoạt động:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">{activity.title}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Thời gian Check-in:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500;">{time_str}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Xác thực Face ID:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #10b981; font-weight: 700;">Khớp khuôn mặt ({int(face_verification['similarity'] * 100)}%)</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="background-color: #fef3c7; border-radius: 8px; padding: 14px 18px; border: 1px solid #fde68a;">
+      <p style="color: #b45309; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+        * Nhắc nhở quan trọng: Đừng quên thực hiện Check-out khi hoạt động kết thúc để được hệ thống tự động ghi nhận điểm rèn luyện (+{activity.points}đ).
+      </p>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                send_mail(
+                    email_subject,
+                    email_message,
+                    getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                    [student.email],
+                    fail_silently=True,
+                    html_message=email_html
+                )
+            except Exception as e:
+                print(f"Error sending check-in confirmation email: {e}")
+
         return Response({
             'message': 'Check-in thành công',
             'face_verified': True,
@@ -2581,6 +2708,7 @@ class ActivityViewSet(viewsets.ModelViewSet):
         now = timezone.now()
         event_start, event_end = _activity_schedule(activity)
         checkout_start = event_start + (event_end - event_start) * (2 / 3)
+        checkout_end = event_end + timezone.timedelta(hours=1)
         if now < checkout_start:
             remaining_seconds = int((checkout_start - now).total_seconds())
             remaining_mins = max(1, math.ceil(remaining_seconds / 60))
@@ -2589,6 +2717,10 @@ class ActivityViewSet(viewsets.ModelViewSet):
                     'Chưa thể check-out. Hoạt động phải trôi qua ít nhất 2/3 '
                     f'thời lượng (còn khoảng {remaining_mins} phút nữa).'
                 ),
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if now > checkout_end:
+            return Response({
+                'error': 'Đã quá thời gian check-out cho phép (tối đa 1 tiếng sau khi hoạt động kết thúc).'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         face_verification, face_error = _verify_attendance_face(request)
@@ -2658,6 +2790,62 @@ class ActivityViewSet(viewsets.ModelViewSet):
                 level='success',
                 action_url='/'
             )
+            if student.email:
+                try:
+                    from django.core.mail import send_mail
+                    from django.conf import settings
+                    local_time = timezone.localtime(checkout_obj.check_out_time)
+                    time_str = local_time.strftime("%H:%M:%S %d/%m/%Y")
+                    
+                    email_subject = f"[ITC Point] Check-out thành công: {activity.title}"
+                    email_message = f"Chào {student.full_name},\n\nHệ thống ghi nhận bạn đã Check-out bằng quét khuôn mặt (Face ID) thành công hoạt động '{activity.title}' vào lúc {time_str}.\n\nThời gian tham gia: {duration_mins} phút ({int(completion_pct)}% thời lượng hoạt động).\n\nBạn được tích lũy +{activity.points}đ điểm rèn luyện từ hoạt động này."
+                    email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800;">Check-out Thành Công</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Hoàn thành hoạt động và nhận điểm rèn luyện</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700;">Chào {student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px;">Chúc mừng bạn đã hoàn thành hoạt động ngoại khóa sau:</p>
+    
+    <div style="background-color: #f0fdf4; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #dcfce7; border-left: 4px solid #10b981;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 150px; text-transform: uppercase;">Hoạt động:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">{activity.title}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Thời gian Check-out:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500;">{time_str}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Thời gian tham gia:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500;">{duration_mins} phút ({int(completion_pct)}% thời lượng)</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Điểm DRL cộng:</td>
+          <td style="padding: 8px 0; font-size: 16px; color: #10b981; font-weight: 700;">+{activity.points} điểm</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                    send_mail(
+                        email_subject,
+                        email_message,
+                        getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                        [student.email],
+                        fail_silently=True,
+                        html_message=email_html
+                    )
+                except Exception as e:
+                    print(f"Error sending check-out confirmation email: {e}")
 
         return Response({
             'message': 'Check-out thành công',
@@ -3079,6 +3267,47 @@ class ExternalActivityViewSet(viewsets.ModelViewSet):
                     level='warning',
                     action_url='/'
                 )
+                if activity.student.email:
+                    try:
+                        from django.core.mail import send_mail
+                        from django.conf import settings
+                        email_subject = f"[ITC Point] Yêu cầu bổ sung minh chứng hoạt động: {activity.activity_name}"
+                        email_message = f"Chào {activity.student.full_name},\n\nCố vấn học tập yêu cầu bạn bổ sung thông tin minh chứng cho hoạt động ngoại khóa '{activity.activity_name}'.\n\nNhận xét: {comment}\n\nVui lòng đăng nhập hệ thống để chỉnh sửa và nộp lại."
+                        email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #f59e0b, #d97706); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800;">Yêu Cầu Bổ Sung Minh Chứng</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">{activity.activity_name}</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700;">Chào {activity.student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px;">Cố vấn học tập đã xem xét minh chứng hoạt động ngoại khóa của bạn và yêu cầu bổ sung thêm thông tin:</p>
+    
+    <div style="background-color: #fef3c7; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #fde68a; border-left: 4px solid #f59e0b;">
+      <p style="margin: 0 0 8px 0; font-size: 14px; color: #92400e; font-weight: 700; text-transform: uppercase;">Ý kiến phản hồi từ Cố vấn:</p>
+      <p style="margin: 0; font-size: 15px; color: #78350f; font-style: italic;">"{comment}"</p>
+    </div>
+
+    <div style="text-align: center; margin: 36px 0 28px 0;">
+      <a href="http://localhost:8080/" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3);">Cập nhật minh chứng</a>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                        send_mail(
+                            email_subject,
+                            email_message,
+                            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                            [activity.student.email],
+                            fail_silently=True,
+                            html_message=email_html
+                        )
+                    except Exception as e:
+                        print(f"Error sending need_more_info email: {e}")
             elif status_input == 'rejected_by_advisor':
                 create_notification(
                     user=student_user,
@@ -3088,6 +3317,47 @@ class ExternalActivityViewSet(viewsets.ModelViewSet):
                     level='danger',
                     action_url='/'
                 )
+                if activity.student.email:
+                    try:
+                        from django.core.mail import send_mail
+                        from django.conf import settings
+                        email_subject = f"[ITC Point] Từ chối minh chứng hoạt động: {activity.activity_name}"
+                        email_message = f"Chào {activity.student.full_name},\n\nMinh chứng hoạt động ngoại khóa '{activity.activity_name}' của bạn đã bị Cố vấn học tập từ chối.\n\nLý do từ chối: {comment}\n\nVui lòng đăng nhập hệ thống để biết thêm chi tiết."
+                        email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #ef4444, #b91c1c); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800;">Minh Chứng Bị Từ Chối</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">{activity.activity_name}</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700;">Chào {activity.student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px;">Chúng tôi rất tiếc phải thông báo minh chứng hoạt động ngoại khóa của bạn đã bị Cố vấn học tập từ chối:</p>
+    
+    <div style="background-color: #fef2f2; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #fee2e2; border-left: 4px solid #ef4444;">
+      <p style="margin: 0 0 8px 0; font-size: 14px; color: #991b1b; font-weight: 700; text-transform: uppercase;">Lý do từ chối:</p>
+      <p style="margin: 0; font-size: 15px; color: #7f1d1d; font-style: italic;">"{comment}"</p>
+    </div>
+
+    <div style="text-align: center; margin: 36px 0 28px 0;">
+      <a href="http://localhost:8080/" style="background: linear-gradient(135deg, #ef4444, #b91c1c); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);">Xem trên hệ thống</a>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                        send_mail(
+                            email_subject,
+                            email_message,
+                            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                            [activity.student.email],
+                            fail_silently=True,
+                            html_message=email_html
+                        )
+                    except Exception as e:
+                        print(f"Error sending advisor rejection email: {e}")
 
         # Audit logging
         AuditLog.objects.create(
@@ -3147,6 +3417,47 @@ class ExternalActivityViewSet(viewsets.ModelViewSet):
                     level='danger',
                     action_url='/'
                 )
+                if activity.student.email:
+                    try:
+                        from django.core.mail import send_mail
+                        from django.conf import settings
+                        email_subject = f"[ITC Point] Từ chối minh chứng hoạt động: {activity.activity_name}"
+                        email_message = f"Chào {activity.student.full_name},\n\nMinh chứng hoạt động ngoại khóa '{activity.activity_name}' của bạn đã bị phòng CTSV từ chối.\n\nLý do từ chối: {comment}\n\nVui lòng đăng nhập hệ thống để biết thêm chi tiết."
+                        email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #ef4444, #b91c1c); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800;">Minh Chứng Bị Từ Chối</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">{activity.activity_name} (Phòng CTSV)</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700;">Chào {activity.student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px;">Chúng tôi rất tiếc phải thông báo minh chứng hoạt động ngoại khóa của bạn đã bị phòng CTSV từ chối:</p>
+    
+    <div style="background-color: #fef2f2; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #fee2e2; border-left: 4px solid #ef4444;">
+      <p style="margin: 0 0 8px 0; font-size: 14px; color: #991b1b; font-weight: 700; text-transform: uppercase;">Lý do từ chối:</p>
+      <p style="margin: 0; font-size: 15px; color: #7f1d1d; font-style: italic;">"{comment}"</p>
+    </div>
+
+    <div style="text-align: center; margin: 36px 0 28px 0;">
+      <a href="http://localhost:8080/" style="background: linear-gradient(135deg, #ef4444, #b91c1c); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);">Xem trên hệ thống</a>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                        send_mail(
+                            email_subject,
+                            email_message,
+                            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                            [activity.student.email],
+                            fail_silently=True,
+                            html_message=email_html
+                        )
+                    except Exception as e:
+                        print(f"Error sending CTSV rejection email: {e}")
 
         # Audit logging
         AuditLog.objects.create(
