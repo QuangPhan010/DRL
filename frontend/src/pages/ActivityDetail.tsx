@@ -30,7 +30,7 @@ export default function ActivityDetail() {
     // Admin / CTSV / Phòng Đào tạo luôn có quyền
     const isStaff = userRoles.includes("admin") || userRoles.includes("student_affairs") || userRoles.includes("academic_affairs");
     if (isStaff) return true;
-    
+
     // Đơn vị tổ chức trực tiếp (khớp tên)
     if (act.organizer === user.fullName) return true;
 
@@ -71,6 +71,7 @@ export default function ActivityDetail() {
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [reviewStatus, setReviewStatus] = useState("");
   const [reviewComment, setReviewComment] = useState("");
+  const [isSoldierCardOpen, setIsSoldierCardOpen] = useState(false);
 
   // Internal activity simulation states
   const [isCheckInSimOpen, setIsCheckInSimOpen] = useState(false);
@@ -138,6 +139,83 @@ export default function ActivityDetail() {
   useEffect(() => {
     fetchDetail();
   }, [id]);
+
+  useEffect(() => {
+    if (!isSoldierCardOpen || !user) return;
+
+    const timer = setTimeout(() => {
+      const canvas = document.getElementById("soldier-card-canvas") as HTMLCanvasElement;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const bgImg = new Image();
+      bgImg.crossOrigin = "anonymous";
+      bgImg.src = "/mhx.png";
+      bgImg.onload = () => {
+        ctx.clearRect(0, 0, 1536, 1024);
+        ctx.drawImage(bgImg, 0, 0, 1536, 1024);
+
+        const drawText = () => {
+          ctx.font = "bold 32px sans-serif";
+          ctx.fillStyle = "#0a3a60";
+          ctx.fillText(user?.fullName || "", 860, 465);
+          ctx.fillText(user?.studentId || "", 860, 545);
+          ctx.fillText(user?.className || "Lớp khóa 2026", 860, 625);
+          ctx.fillText(`MHX2026_${user?.studentId || ""}`, 860, 705);
+        };
+
+        if (user?.avatar) {
+          const avatarImg = new Image();
+          avatarImg.src = user.avatar;
+          avatarImg.onload = () => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(278, 438, 158, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.drawImage(avatarImg, 90, 250, 376, 376);
+            ctx.restore();
+
+            // Overlay the green shield badge from the template on top of the avatar
+            // using a precise shield clipping path to clip out the gray background
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(180, 595);
+            ctx.lineTo(278, 568); // shield top tip
+            ctx.lineTo(376, 595);
+            ctx.lineTo(365, 740);
+            ctx.lineTo(278, 765); // shield bottom tip
+            ctx.lineTo(191, 740);
+            ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(bgImg, 0, 0, 1536, 1024);
+            ctx.restore();
+
+            drawText();
+          };
+          avatarImg.onerror = () => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(278, 438, 158, 0, Math.PI * 2);
+            ctx.fillStyle = "#e2e8f0";
+            ctx.fill();
+            ctx.restore();
+            drawText();
+          };
+        } else {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(278, 438, 158, 0, Math.PI * 2);
+          ctx.fillStyle = "#e2e8f0";
+          ctx.fill();
+          ctx.restore();
+          drawText();
+        }
+      };
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [isSoldierCardOpen, user]);
 
   // Actions for Internal Activity
   const registerActivity = async () => {
@@ -694,8 +772,8 @@ export default function ActivityDetail() {
                           <div
                             key={flag.id}
                             className={`p-3 border rounded-xl text-xs flex gap-2.5 ${flag.severity === "Critical" ? "bg-red-50 border-red-200 text-red-700" :
-                                flag.severity === "High" ? "bg-orange-50 border-orange-200 text-orange-700" :
-                                  "bg-yellow-50 border-yellow-200 text-yellow-700"
+                              flag.severity === "High" ? "bg-orange-50 border-orange-200 text-orange-700" :
+                                "bg-yellow-50 border-yellow-200 text-yellow-700"
                               }`}
                           >
                             <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
@@ -774,6 +852,15 @@ export default function ActivityDetail() {
                       )}
                       {studentStatus === "attended" && (
                         <Badge variant="outline" className="bg-success/10 text-success p-2 justify-center w-full text-center">Bạn đã tham gia hoạt động này</Badge>
+                      )}
+                      {activity.is_soldier_card_enabled && isRegistered && (
+                        <Button
+                          type="button"
+                          className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold mt-2 gap-2 shadow-md hover:from-emerald-600 hover:to-teal-700"
+                          onClick={() => setIsSoldierCardOpen(true)}
+                        >
+                          🎖️ Xem & Tải thẻ chiến sĩ MHX
+                        </Button>
                       )}
                     </>
                   )}
@@ -941,6 +1028,46 @@ export default function ActivityDetail() {
               <Button type="submit" className="bg-success text-white" disabled={!faceVerification || !gpsPosition}>Xác nhận Check-out</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Thẻ chiến sĩ tình nguyện */}
+      <Dialog open={isSoldierCardOpen} onOpenChange={setIsSoldierCardOpen}>
+        <DialogContent className="sm:max-w-[550px] overflow-hidden p-6 bg-slate-900 border-slate-800 text-white rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display text-lg font-bold text-center text-white flex items-center justify-center gap-2">
+              🎖️ THẺ CHIẾN SĨ TÌNH NGUYỆN
+            </DialogTitle>
+            <DialogDescription className="text-center text-slate-300 text-xs">
+              Chiến dịch tình nguyện Mùa Hè Xanh 2026
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col items-center justify-center py-4 gap-6">
+            {/* Direct Canvas Preview (Guarantees 100% fidelity) */}
+            <canvas
+              id="soldier-card-canvas"
+              width={1536}
+              height={1024}
+              className="w-full max-w-[450px] aspect-[1.5] rounded-xl border border-slate-700 shadow-2xl bg-slate-800"
+            />
+
+            <Button
+              type="button"
+              onClick={() => {
+                const canvas = document.getElementById("soldier-card-canvas") as HTMLCanvasElement;
+                if (!canvas) return;
+                const link = document.createElement("a");
+                link.download = `the_chien_si_${user?.studentId || "sv"}.png`;
+                link.href = canvas.toDataURL("image/png");
+                link.click();
+                toast.success("Tải xuống thẻ chiến sĩ thành công!");
+              }}
+              className="bg-gradient-primary w-full max-w-[280px] font-bold text-sm h-11 flex items-center justify-center gap-2"
+            >
+              <Download className="h-5 w-5" /> Tải thẻ chiến sĩ (PNG)
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

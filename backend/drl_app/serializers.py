@@ -311,7 +311,7 @@ class ActivitySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Activity
-        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'max_participants', 'check_in_time', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end', 'room', 'room_detail', 'is_external', 'location')
+        fields = ('id', 'title', 'description', 'points', 'criterion', 'date', 'organizer', 'status', 'participants', 'latitude', 'longitude', 'radius_meters', 'duration_minutes', 'max_participants', 'check_in_time', 'start_time', 'end_time', 'scope_type', 'allowed_classes', 'allowed_clubs', 'is_registration_required', 'registration_start', 'registration_end', 'room', 'room_detail', 'is_external', 'location', 'is_soldier_card_enabled')
 
     def validate_organizer(self, value):
         organizer = value.strip()

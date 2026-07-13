@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { normalizeSearch } from "@/lib/search";
 import Loading from "./Loading";
+import { RadialTimePicker } from "./Activities";
 
 type SchoolClass = { id: number; name: string; faculty: string; cohort: string; student_count?: number };
 type Student = { id: number; student_id: string; full_name: string; class_name: string; faculty: string; cohort: string };
@@ -147,6 +148,12 @@ export default function EvaluationSession() {
   const [semester, setSemester] = useState("HK1");
   const [year, setYear] = useState(getAcademicYears()[1]);
   const [criteriaSetId, setCriteriaSetId] = useState("");
+  const [selfAssessmentStartDate, setSelfAssessmentStartDate] = useState("");
+  const [selfAssessmentStartTime, setSelfAssessmentStartTime] = useState("08:00");
+  const [selfAssessmentEndDate, setSelfAssessmentEndDate] = useState("");
+  const [selfAssessmentEndTime, setSelfAssessmentEndTime] = useState("17:00");
+  const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
+  const [timePickerTarget, setTimePickerTarget] = useState<'selfStart' | 'selfEnd'>('selfStart');
   const [query, setQuery] = useState("");
   const [scores, setScores] = useState<ScoreRow[]>([]);
   const [savedCount, setSavedCount] = useState(0);
@@ -178,17 +185,20 @@ export default function EvaluationSession() {
         );
         const matchingSet = latestImportedPeriod
           ? setData.find((item: CriteriaSet) =>
-              item.semester === latestImportedPeriod.semester
-              && item.academic_year === latestImportedPeriod.school_year
-            )
+            item.semester === latestImportedPeriod.semester
+            && item.academic_year === latestImportedPeriod.school_year
+          )
           : null;
-        const preferred = matchingSet
-          || setData.find((item: CriteriaSet) => item.is_active)
+        const preferred = setData.find((item: CriteriaSet) => item.is_active)
+          || matchingSet
           || setData[0];
         if (preferred) {
           setCriteriaSetId(String(preferred.id));
         }
-        if (latestImportedPeriod) {
+        if (preferred && preferred.is_active && preferred.semester && preferred.academic_year) {
+          setSemester(preferred.semester);
+          setYear(preferred.academic_year);
+        } else if (latestImportedPeriod) {
           setSemester(latestImportedPeriod.semester);
           setYear(latestImportedPeriod.school_year);
         } else if (preferred) {
@@ -335,6 +345,7 @@ export default function EvaluationSession() {
         }),
       );
       const map = new Map<string, TranscriptItem>();
+      const newImportedAttendance: Record<string, { attended: number; absent: number }> = {};
       details.flatMap((item: any) => item.items || item.students || []).forEach((item: any) => {
         if (item.student_code) {
           const gpaVal = Number(item.gpa);
@@ -343,9 +354,15 @@ export default function EvaluationSession() {
             gpa: gpaVal,
             classification: classifyAcademicGpa(gpaVal),
           });
+          const absentCount = item.absent_sessions || 0;
+          newImportedAttendance[item.student_code] = {
+            attended: Math.max(0, 10 - absentCount),
+            absent: absentCount,
+          };
         }
       });
       setTranscripts([...map.values()]);
+      setImportedAttendance(newImportedAttendance);
       setTranscriptNotice("");
     } catch (error) {
       setTranscripts([]);
@@ -427,10 +444,8 @@ export default function EvaluationSession() {
         if (academicCriterion && !academicCriterion.is_manual) {
           rawCriterionScores[academicCriterion.id] = academicPoints(record?.gpa ?? null);
         }
-        let attendanceCount = 0;
         const custom = importedAttendance[student.student_id];
         if (custom) {
-          attendanceCount = custom.attended;
           // Find class attendance or chuyên cần criterion
           const attendanceCriterion = criteria.find(c => {
             const name = normalizeSearch(c.name);
@@ -441,19 +456,20 @@ export default function EvaluationSession() {
             const score = Math.max(0, attendanceCriterion.max_score - custom.absent);
             rawCriterionScores[attendanceCriterion.id] = score;
           }
-        } else {
-          // If no import, we check database activities
-          activities.forEach((activity) => {
-            const attended = (activity.participants || []).some(
-              (participant) => participant.student_id === student.student_id && participant.status === "attended",
-            );
-            const activityCriterion = criteria.find((criterion) => criterion.id === activity.criterion);
-            if (attended && rawCriterionScores[activity.criterion] !== undefined && !activityCriterion?.is_manual) {
-              rawCriterionScores[activity.criterion] += activity.points;
-              attendanceCount += 1;
-            }
-          });
         }
+
+        // Always check database activities for activity points
+        let attendanceCount = 0;
+        activities.forEach((activity) => {
+          const attended = (activity.participants || []).some(
+            (participant) => participant.student_id === student.student_id && participant.status === "attended",
+          );
+          const activityCriterion = criteria.find((criterion) => criterion.id === activity.criterion);
+          if (attended && rawCriterionScores[activity.criterion] !== undefined && !activityCriterion?.is_manual) {
+            rawCriterionScores[activity.criterion] += activity.points;
+            attendanceCount += 1;
+          }
+        });
         criteria.forEach((criterion) => {
           criterionScores[criterion.id] = Math.max(
             0,
@@ -558,13 +574,14 @@ export default function EvaluationSession() {
 
   const saveSession = async () => {
     if (!scores.length) return;
+    const selfAssessmentStart = selfAssessmentStartDate ? `${selfAssessmentStartDate}T${selfAssessmentStartTime || "00:00"}` : "";
+    const selfAssessmentDeadline = selfAssessmentEndDate ? `${selfAssessmentEndDate}T${selfAssessmentEndTime || "23:59"}` : "";
     try {
       setSaving(true);
       setSavedCount(0);
-      let completed = 0;
-      const batchSize = 10;
 
-      const saveRow = async (row: any) => {
+      // 1. Prepare all student payloads
+      const payloads = scores.map((row) => {
         const detailScores: Record<string, number> = {};
         criteria.forEach((criterion) => {
           const isAcademic = normalizeSearch(criterion.name).includes("hoc luc") || normalizeSearch(criterion.name).includes("hoc tap");
@@ -584,7 +601,7 @@ export default function EvaluationSession() {
           }
         });
 
-        const payload = {
+        return {
           studentId: row.student_id,
           semester,
           year,
@@ -593,50 +610,78 @@ export default function EvaluationSession() {
           academicClassification: row.academicClassification === "Chưa có dữ liệu" ? "" : row.academicClassification,
           rawScore: row.rawTotal,
           scores: detailScores,
-          status: "draft",
-          note: "Khởi tạo tự động từ phiên đánh giá",
+          status: "published",
+          note: "",
         };
+      });
 
-        let response: Response | null = null;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          response = await fetch(`${API_URL}/evaluations/`, {
-            method: "POST",
-            headers: headers(),
-            body: JSON.stringify(payload),
-          });
-          if (response.ok) break;
-          if (response.status < 500 || attempt === 2) break;
-          await wait(300 * (attempt + 1));
-        }
-
-        if (!response?.ok) {
-          let backendMessage = "";
-          try {
-            const errorData = await response?.json();
-            backendMessage = errorData?.detail || errorData?.error || "";
-          } catch {
-            backendMessage = "";
-          }
-          throw new Error(
-            backendMessage
-              ? `Không lưu được ${row.student_id}: ${backendMessage}`
-              : `Không lưu được ${row.student_id} (HTTP ${response?.status || "mất kết nối"})`,
-          );
-        }
-        completed += 1;
-        setSavedCount(completed);
-      };
-
-      // Process in parallel batches of 10
-      for (let i = 0; i < scores.length; i += batchSize) {
-        const batch = scores.slice(i, i + batchSize);
-        await Promise.all(batch.map((row) => saveRow(row)));
+      // Save configuration for self assessment period
+      if (selfAssessmentStart) {
+        await fetch(`${API_URL}/configs/set-value/`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ key: "self_assessment_start", value: selfAssessmentStart, description: "Thời gian bắt đầu tự đánh giá" }),
+        });
+      }
+      if (selfAssessmentDeadline) {
+        await fetch(`${API_URL}/configs/set-value/`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ key: "self_assessment_deadline", value: selfAssessmentDeadline, description: "Hạn chót tự đánh giá và khiếu nại" }),
+        });
       }
 
-      toast.success(`Đã lưu phiên và tạo ${completed} phiếu đánh giá nháp`);
+      // 2. Post to bulk-init endpoint
+      const initResponse = await fetch(`${API_URL}/evaluations/bulk-init/`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify(payloads),
+      });
+
+      if (!initResponse.ok) {
+        const errorData = await initResponse.json().catch(() => ({}));
+        throw new Error(errorData?.detail || "Không thể khởi động tiến trình tạo phiếu hàng loạt.");
+      }
+
+      const jobData = await initResponse.json();
+      const jobId = jobData.jobId;
+
+      // 3. Poll status
+      const pollInterval = 1000;
+      return new Promise<void>((resolve, reject) => {
+        const checkStatus = async () => {
+          try {
+            const statusResponse = await fetch(`${API_URL}/evaluations/bulk-job/${jobId}/`, {
+              headers: headers(),
+            });
+
+            if (!statusResponse.ok) {
+              reject(new Error("Lỗi khi kiểm tra tiến trình tạo phiếu."));
+              return;
+            }
+
+            const currentJob = await statusResponse.json();
+            setSavedCount(currentJob.progress || 0);
+
+            if (currentJob.status === "SUCCESS") {
+              toast.success(`Đã lưu phiên và tạo ${currentJob.total} phiếu đánh giá nháp thành công!`);
+              setSaving(false);
+              resolve();
+            } else if (currentJob.status === "FAILED") {
+              reject(new Error(currentJob.errorMessage || "Tiến trình tạo phiếu thất bại trên server."));
+            } else {
+              // Still running or pending, check again
+              setTimeout(checkStatus, pollInterval);
+            }
+          } catch (err) {
+            reject(err);
+          }
+        };
+        setTimeout(checkStatus, pollInterval);
+      });
+
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Lưu phiên không thành công");
-    } finally {
       setSaving(false);
     }
   };
@@ -953,7 +998,6 @@ export default function EvaluationSession() {
                   </TableHead>
                 ))}
                 <TableHead className="min-w-24 text-center">Tổng điểm</TableHead>
-                <TableHead>Điểm dư</TableHead>
                 <TableHead>Xếp loại rèn luyện</TableHead>
               </TableRow>
             </TableHeader>
@@ -989,7 +1033,6 @@ export default function EvaluationSession() {
                     </TableCell>
                   ))}
                   <TableCell className="text-center text-base font-bold text-primary">{row.total}</TableCell>
-                  <TableCell>{row.surplus > 0 ? <Badge className="bg-cyan-500/10 text-cyan-700 hover:bg-cyan-500/10">+{row.surplus}</Badge> : "-"}</TableCell>
                   <TableCell><ClassificationBadge value={row.classification} /></TableCell>
                 </TableRow>
               ))}
@@ -1004,26 +1047,73 @@ export default function EvaluationSession() {
     <Card className="mx-auto w-full max-w-3xl">
       <CardHeader className="text-center">
         <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-success/15 text-success"><Save className="h-7 w-7" /></div>
-        <CardTitle className="text-2xl">Sẵn sàng lưu phiên đánh giá</CardTitle>
-        <CardDescription>Hệ thống sẽ tạo phiếu điểm nháp cho toàn bộ sinh viên trong phạm vi.</CardDescription>
+        <CardTitle className="text-2xl">Sẵn sàng công bố & lưu phiên</CardTitle>
+        <CardDescription>Hệ thống sẽ khởi tạo và công bố phiếu điểm cho toàn bộ sinh viên trong phạm vi.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="grid gap-3 sm:grid-cols-2">
           <SummaryLine label="Kỳ đánh giá" value={`${semester} · ${year}`} />
           <SummaryLine label="Bộ tiêu chí" value={selectedSet?.name || "-"} />
           <SummaryLine label="Số sinh viên" value={`${scores.length} sinh viên`} />
-          <SummaryLine label="Trạng thái sau lưu" value="Phiếu nháp" />
+          <SummaryLine label="Trạng thái sau lưu" value="Đã công bố" />
         </div>
-        {saving && <div className="space-y-2"><div className="flex justify-between text-sm"><span>Đang tạo phiếu đánh giá...</span><strong>{savedCount}/{scores.length}</strong></div><Progress value={(savedCount / scores.length) * 100} /></div>}
+
+        <div className="grid gap-4 border p-4 rounded-xl bg-muted/20">
+          <p className="font-semibold text-sm text-primary flex items-center gap-1.5">⏰ Hạn tự đánh giá & khiếu nại của sinh viên</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Bắt đầu từ</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="date"
+                  value={selfAssessmentStartDate}
+                  onChange={(e) => setSelfAssessmentStartDate(e.target.value)}
+                  onClick={(e) => e.currentTarget.showPicker()}
+                  className="h-9 text-xs"
+                />
+                <Input
+                  type="text"
+                  value={selfAssessmentStartTime}
+                  readOnly
+                  onClick={() => { setTimePickerTarget('selfStart'); setIsTimePickerOpen(true); }}
+                  className="cursor-pointer font-mono h-9 text-xs text-center"
+                  placeholder="Chọn giờ"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Hạn chót (kết thúc)</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="date"
+                  value={selfAssessmentEndDate}
+                  onChange={(e) => setSelfAssessmentEndDate(e.target.value)}
+                  onClick={(e) => e.currentTarget.showPicker()}
+                  className="h-9 text-xs"
+                />
+                <Input
+                  type="text"
+                  value={selfAssessmentEndTime}
+                  readOnly
+                  onClick={() => { setTimePickerTarget('selfEnd'); setIsTimePickerOpen(true); }}
+                  className="cursor-pointer font-mono h-9 text-xs text-center"
+                  placeholder="Chọn giờ"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {saving && <div className="space-y-2"><div className="flex justify-between text-sm"><span>Đang công bố phiếu đánh giá...</span><strong>{savedCount}/{scores.length}</strong></div><Progress value={(savedCount / scores.length) * 100} /></div>}
         {!saving && savedCount === scores.length && scores.length > 0 && (
           <div className="flex flex-col gap-3 rounded-xl border border-success/20 bg-success/10 p-4 text-success sm:flex-row sm:items-center">
             <CheckCircle2 className="h-5 w-5 shrink-0" />
-            <span className="flex-1 font-medium">Phiên đã được lưu thành công.</span>
+            <span className="flex-1 font-medium">Phiên rèn luyện và thời hạn đã được công bố thành công.</span>
           </div>
         )}
-        <Button className="h-12 w-full bg-gradient-primary text-base" onClick={saveSession} disabled={saving || !scores.length || savedCount === scores.length}>
+        <Button className="h-12 w-full bg-gradient-primary text-base animate-pulse" onClick={saveSession} disabled={saving || !scores.length || savedCount === scores.length}>
           {saving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
-          {savedCount === scores.length && scores.length ? "Đã lưu phiên" : "Lưu và tạo phiếu đánh giá"}
+          {savedCount === scores.length && scores.length ? "Đã công bố & lưu phiên" : "Công bố & Lưu phiên đánh giá"}
         </Button>
       </CardContent>
     </Card>
@@ -1097,6 +1187,20 @@ export default function EvaluationSession() {
           </Button>
         )}
       </div>
+
+      <RadialTimePicker
+        open={isTimePickerOpen}
+        onClose={() => setIsTimePickerOpen(false)}
+        value={timePickerTarget === 'selfStart' ? selfAssessmentStartTime : selfAssessmentEndTime}
+        onChange={(val) => {
+          if (timePickerTarget === 'selfStart') {
+            setSelfAssessmentStartTime(val);
+          } else {
+            setSelfAssessmentEndTime(val);
+          }
+        }}
+        title={timePickerTarget === 'selfStart' ? "Chọn giờ bắt đầu tự đánh giá" : "Chọn giờ kết thúc tự đánh giá"}
+      />
     </div>
   );
 }

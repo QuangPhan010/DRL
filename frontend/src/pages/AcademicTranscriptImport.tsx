@@ -211,7 +211,7 @@ export default function AcademicTranscriptImport() {
         const wb = XLSX.read(bstr, { type: "binary" });
         const sheetName = wb.SheetNames[0];
         const ws = wb.Sheets[sheetName];
-        const data = XLSX.utils.sheet_to_json<any>(evt.target?.result ? ws : ws, { header: 1 });
+        const data = XLSX.utils.sheet_to_json<any>(ws, { header: 1 });
 
         if (data.length === 0) {
           toast.error("File excel trống.");
@@ -220,7 +220,9 @@ export default function AcademicTranscriptImport() {
 
         let headerIndex = -1;
         let mssvColIndex = -1;
+        let absentColIndex = -1;
         const requiredIdTerms = ['mã sv', 'ma sv', 'student id', 'student_id', 'mã sinh viên', 'ma sinh vien', 'mssv', 'mã số sinh viên', 'ma so sinh vien'];
+        const absentTerms = ['vắng', 'vang', 'buổi vắng', 'buoi vang', 'số buổi vắng', 'so buoi vang', 'absent', 'absent_sessions'];
 
         for (let r = 0; r < Math.min(data.length, 10); r++) {
           const row = data[r];
@@ -230,10 +232,12 @@ export default function AcademicTranscriptImport() {
             if (requiredIdTerms.some(term => cellVal.includes(term))) {
               headerIndex = r;
               mssvColIndex = c;
-              break;
+            }
+            if (absentTerms.some(term => cellVal.includes(term))) {
+              absentColIndex = c;
             }
           }
-          if (mssvColIndex !== -1) break;
+          if (mssvColIndex !== -1 && absentColIndex !== -1) break;
         }
 
         if (mssvColIndex === -1) {
@@ -242,21 +246,23 @@ export default function AcademicTranscriptImport() {
           headerIndex = -1;
         }
 
-        const codes: string[] = [];
+        const lines: string[] = [];
         for (let r = headerIndex + 1; r < data.length; r++) {
           const row = data[r];
           if (!row) continue;
-          const val = String(row[mssvColIndex] || "").trim();
-          if (val && val !== "undefined" && val.length > 2) {
-            codes.push(val);
+          const code = String(row[mssvColIndex] || "").trim();
+          const absentVal = absentColIndex !== -1 ? parseInt(row[absentColIndex]) : 1;
+          const absentCount = isNaN(absentVal) ? 1 : absentVal;
+          if (code && code !== "undefined" && code.length > 2) {
+            lines.push(`${code}, ${absentCount}`);
           }
         }
 
-        if (codes.length === 0) {
+        if (lines.length === 0) {
           toast.error("Không tìm thấy mã sinh viên nào trong file.");
         } else {
-          setAttendanceText(codes.join("\n"));
-          toast.success(`Đã đọc ${codes.length} mã sinh viên từ file Excel.`);
+          setAttendanceText(lines.join("\n"));
+          toast.success(`Đã đọc ${lines.length} dòng điểm danh từ file Excel.`);
         }
       } catch (err) {
         console.error(err);
@@ -639,20 +645,32 @@ export default function AcademicTranscriptImport() {
   }, [activeTab]);
 
   const handleImportAttendance = async () => {
-    if (!selectedActivityId) {
-      toast.error("Vui lòng chọn một hoạt động để điểm danh.");
+    if (!selectedClassId) {
+      toast.error("Vui lòng chọn một lớp học.");
       return;
     }
-    const studentCodes = attendanceText
-      .split(/[\n,;\t]+/)
-      .map((c) => c.trim())
-      .filter((c) => c.length > 0);
-      
-    if (studentCodes.length === 0) {
+    if (!schoolYear) {
+      toast.error("Vui lòng chọn năm học.");
+      return;
+    }
+    if (!semester) {
+      toast.error("Vui lòng chọn học kỳ.");
+      return;
+    }
+
+    const lines = attendanceText.split("\n");
+    const attendances = lines.map(line => {
+      const parts = line.split(/[\t,;]+/).map(p => p.trim());
+      const studentCode = parts[0];
+      const absentCount = parseInt(parts[1]) || 0;
+      return { student_code: studentCode, absent_sessions: absentCount };
+    }).filter(item => item.student_code.length > 2);
+
+    if (attendances.length === 0) {
       toast.error("Vui lòng nhập ít nhất một mã sinh viên.");
       return;
     }
-    
+
     try {
       setImportingAttendance(true);
       const token = localStorage.getItem("drl_token");
@@ -660,18 +678,21 @@ export default function AcademicTranscriptImport() {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       };
-      const res = await fetch(`${API_URL}/activities/${selectedActivityId}/import-attendance/`, {
+      const res = await fetch(`${API_URL}/transcripts/import-attendance/`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ student_codes: studentCodes })
+        body: JSON.stringify({
+          class_id: selectedClassId,
+          school_year: schoolYear,
+          semester: semester,
+          student_attendances: attendances
+        })
       });
       const data = await res.json();
       if (res.ok) {
         toast.success(data.message || "Điểm danh thành công!");
         setAttendanceText("");
-        if (data.failed_codes && data.failed_codes.length > 0) {
-          toast.warning(`Không tìm thấy các MSSV: ${data.failed_codes.join(", ")}`);
-        }
+        fetchHistory();
       } else {
         toast.error(data.error || "Gặp lỗi khi nhập danh sách điểm danh.");
       }
@@ -1098,7 +1119,7 @@ export default function AcademicTranscriptImport() {
 
         <TabsContent value="attendance" className="mt-2 animate-tab-content">
           <div className="grid gap-4 lg:grid-cols-[380px_1fr] xl:grid-cols-[450px_1fr]">
-            {/* Left Card: Select Activity & Textarea */}
+            {/* Left Card: Select Class & Textarea */}
             <Card className="border-0 shadow-md">
               <CardHeader className="pb-3">
                 <CardTitle className="font-display flex items-center gap-2">
@@ -1106,27 +1127,41 @@ export default function AcademicTranscriptImport() {
                   Nhập danh sách điểm danh đi học
                 </CardTitle>
                 <CardDescription>
-                  Chọn môn học / hoạt động và nhập danh sách MSSV đi học đầy đủ để ghi nhận chuyên cần.
+                  Chọn lớp học và học kỳ để nhập số buổi vắng học ghi nhận chuyên cần của sinh viên.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="activity-select" className="text-sm font-semibold">Chọn Môn học / Hoạt động *</Label>
-                  <Select value={selectedActivityId} onValueChange={setSelectedActivityId}>
-                    <SelectTrigger id="activity-select" className="bg-background">
-                      <SelectValue placeholder="-- Chọn môn học / hoạt động --" />
+                  <Label htmlFor="class-select" className="text-sm font-semibold">Chọn Lớp học *</Label>
+                  <Select value={selectedClassId} onValueChange={setSelectedClassId}>
+                    <SelectTrigger id="class-select" className="bg-background">
+                      <SelectValue placeholder="-- Chọn lớp học --" />
                     </SelectTrigger>
                     <SelectContent>
-                      {activities.map((act) => (
-                        <SelectItem key={act.id} value={String(act.id)}>
-                          {act.title} (+{act.points}đ)
+                      {classes.map((cls) => (
+                        <SelectItem key={cls.id} value={String(cls.id)}>
+                          {cls.name}
                         </SelectItem>
                       ))}
-                      {activities.length === 0 && (
-                        <SelectItem value="none" disabled>Không có môn học / hoạt động nào khả dụng</SelectItem>
-                      )}
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground uppercase font-semibold">Năm học</Label>
+                    <Select value={schoolYear} onValueChange={setSchoolYear}>
+                      <SelectTrigger className="bg-background"><SelectValue placeholder="Chọn năm học" /></SelectTrigger>
+                      <SelectContent>{academicYearOptions().map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground uppercase font-semibold">Học kỳ</Label>
+                    <Select value={semester} onValueChange={setSemester}>
+                      <SelectTrigger className="bg-background"><SelectValue placeholder="Chọn học kỳ" /></SelectTrigger>
+                      <SelectContent>{SEMESTERS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -1158,11 +1193,11 @@ export default function AcademicTranscriptImport() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="mssv-list" className="text-sm font-semibold">Danh sách MSSV đi học / tham gia</Label>
+                  <Label htmlFor="mssv-list" className="text-sm font-semibold">Danh sách MSSV và số buổi vắng</Label>
                   <Textarea
                     id="mssv-list"
                     rows={6}
-                    placeholder="Nhập mã sinh viên hoặc tải file excel ở trên (mỗi mã 1 dòng hoặc cách nhau bằng dấu phẩy)"
+                    placeholder="Ví dụ:&#13;SV001, 3&#13;SV002, 1"
                     value={attendanceText}
                     onChange={(e) => setAttendanceText(e.target.value)}
                     className="font-mono text-xs bg-background"
@@ -1171,7 +1206,7 @@ export default function AcademicTranscriptImport() {
 
                 <Button 
                   onClick={handleImportAttendance} 
-                  disabled={importingAttendance || !selectedActivityId}
+                  disabled={importingAttendance || !selectedClassId || !schoolYear || !semester}
                   className="w-full gap-2 bg-gradient-primary"
                 >
                   {importingAttendance ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -1187,14 +1222,14 @@ export default function AcademicTranscriptImport() {
                 <CardDescription>Các bước nhập danh sách điểm danh đi học / chuyên cần của sinh viên.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-sm text-muted-foreground leading-relaxed">
-                <p>1. <strong>Chọn môn học / hoạt động</strong> cần nhập điểm danh đi học trong danh sách bên trái.</p>
-                <p>2. <strong>Sao chép cột MSSV</strong> đi học đầy đủ từ Excel, bảng điểm danh PDF hoặc file ghi nhận lớp học, sau đó dán vào khung nhập liệu.</p>
+                <p>1. <strong>Chọn lớp học, năm học và học kỳ</strong> cần nhập điểm danh bên trái.</p>
+                <p>2. <strong>Tải file Excel</strong> hoặc <strong>Sao chép dữ liệu</strong> (gồm cột MSSV và Số buổi vắng) rồi dán vào khung nhập liệu.</p>
                 <p>3. Nhấn nút <strong>“Xác nhận điểm danh đi học”</strong> để gửi danh sách lên hệ thống.</p>
-                <p>4. Hệ thống sẽ quét, khớp mã sinh viên, đăng ký tham gia lớp học/hoạt động đó và cập nhật trạng thái điểm danh đi học thành <strong>“Đã tham gia” (attended)</strong> để ghi nhận tích lũy chuyên cần rèn luyện.</p>
+                <p>4. Hệ thống sẽ lưu số buổi vắng học của sinh viên theo học kỳ để tự động tính điểm rèn luyện.</p>
                 <p className="bg-amber-500/10 border border-amber-500/20 text-amber-700 p-3 rounded-xl text-xs flex items-start gap-2 mt-4">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
                   <span>
-                    <strong>Chú ý:</strong> Nếu MSSV không tồn tại trong hệ thống, hệ thống sẽ bỏ qua và hiển thị cảnh báo danh sách các MSSV không hợp lệ sau khi quá trình hoàn tất.
+                    <strong>Chú ý:</strong> Nếu MSSV không tồn tại trong hệ thống, hệ thống sẽ tự động bỏ qua sinh viên đó.
                   </span>
                 </p>
               </CardContent>

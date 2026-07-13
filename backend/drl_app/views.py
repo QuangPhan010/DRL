@@ -1371,8 +1371,11 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             'details__sub_item__group__criterion',
         )
         
-        if user.is_authenticated and user.role == 'advisor':
-            queryset = queryset.filter(student__class_info__advisor=user)
+        if user.is_authenticated:
+            if user.role == 'student':
+                queryset = queryset.filter(student__user=user).exclude(status='draft')
+            elif user.role == 'advisor':
+                queryset = queryset.filter(student__class_info__advisor=user)
             
         class_name = self.request.query_params.get('className') or self.request.query_params.get('class_name')
         semester = self.request.query_params.get('semester')
@@ -1509,17 +1512,22 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                     existing_evaluation = Evaluation.objects.filter(
                         student=student, semester=semester, year=year
                     ).first()
-                    if existing_evaluation and existing_evaluation.criteria_set:
-                        criteria_set = existing_evaluation.criteria_set
-                    elif requested_set_id:
+
+                    if requested_set_id:
                         criteria_set = get_object_or_404(CriteriaSet, pk=requested_set_id)
                     else:
-                        criteria_set = (
+                        active_set = (
                             CriteriaSet.objects.filter(
                                 semester=semester, academic_year=year, is_active=True
                             ).first()
                             or CriteriaSet.objects.filter(is_active=True).first()
                         )
+                        if active_set:
+                            criteria_set = active_set
+                        elif existing_evaluation and existing_evaluation.criteria_set:
+                            criteria_set = existing_evaluation.criteria_set
+                        else:
+                            criteria_set = None
                     if not criteria_set:
                         return Response(
                             {'detail': 'Chưa có bộ tiêu chí nào được quản trị viên kích hoạt.'},
@@ -1573,6 +1581,62 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                     time.sleep(0.1 * (attempt + 1))
                     continue
                 raise
+
+    @action(detail=False, methods=['post'], url_path='bulk-init')
+    def bulk_init(self, request):
+        payload_data = request.data
+        if not isinstance(payload_data, list):
+            return Response({'detail': 'Payload must be a list of evaluations.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        from .services.evaluation_bulk_service import launch_bulk_init_job
+        job = launch_bulk_init_job(payload_data)
+        
+        return Response({
+            'jobId': job.id,
+            'status': job.status,
+            'progress': job.progress,
+            'total': job.total
+        }, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['post'], url_path='bulk-update-status')
+    def bulk_update_status(self, request):
+        status_param = request.data.get('status')
+        evaluation_ids = request.data.get('evaluationIds')
+        criteria_set_id = request.data.get('criteriaSetId')
+        semester = request.data.get('semester')
+        year = request.data.get('year')
+        class_name = request.data.get('className')
+
+        if status_param not in ['draft', 'published', 'class_pending', 'advisor_pending', 'pending', 'approved', 'rejected', 'locked']:
+            return Response({'detail': 'Trạng thái không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = Evaluation.objects.all()
+        if evaluation_ids:
+            queryset = queryset.filter(id__in=evaluation_ids)
+        else:
+            if criteria_set_id:
+                queryset = queryset.filter(criteria_set_id=criteria_set_id)
+            if semester:
+                queryset = queryset.filter(semester=semester)
+            if year:
+                queryset = queryset.filter(year=year)
+            if class_name:
+                queryset = queryset.filter(student__class_info__name=class_name)
+
+        count = queryset.update(status=status_param)
+        return Response({'success': True, 'updated_count': count})
+
+    @action(detail=False, methods=['get'], url_path='bulk-job/(?P<job_id>[^/.]+)')
+    def bulk_job_status(self, request, job_id=None):
+        from .models import EvaluationJob
+        job = get_object_or_404(EvaluationJob, pk=job_id)
+        return Response({
+            'jobId': job.id,
+            'status': job.status,
+            'progress': job.progress,
+            'total': job.total,
+            'errorMessage': job.error_message
+        })
 
     @action(detail=True, methods=['post'], url_path='submit-self-assessment')
     def submit_self_assessment(self, request, pk=None):
@@ -1783,7 +1847,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         except ValidationError as e:
             return self._error_res('VALIDATION_ERROR', str(e), {}, status.HTTP_400_BAD_REQUEST)
         
-        if status_param not in ['approved', 'rejected', 'pending']:
+        if status_param not in ['approved', 'rejected', 'pending', 'published', 'locked']:
             return self._error_res('VALIDATION_ERROR', 'Trạng thái phê duyệt không hợp lệ.', {}, status.HTTP_400_BAD_REQUEST)
             
         evaluation.status = status_param
@@ -1792,11 +1856,15 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         evaluation.save()
 
         # Audit standard action
-        audit_action = 'Advisor Approved'
-        if status_param == 'rejected':
-            audit_action = 'Advisor Rejected'
-        elif request.user.role == 'student_affairs':
-            audit_action = 'Student Affairs Approved'
+        audit_action = f'Status Updated to {status_param.capitalize()}'
+        if status_param == 'approved':
+            audit_action = 'Approved'
+        elif status_param == 'rejected':
+            audit_action = 'Rejected'
+        elif status_param == 'published':
+            audit_action = 'Published'
+        elif status_param == 'locked':
+            audit_action = 'Locked'
             
         log_audit(user=request.user, action=audit_action, entity_id=evaluation.id, before_value='', after_value=f"status={status_param}_version={evaluation.version}", request=request)
 
@@ -2813,6 +2881,19 @@ class SystemConfigViewSet(viewsets.ModelViewSet):
     serializer_class = SystemConfigSerializer
     lookup_field = 'key'
     permission_classes = [permissions.AllowAny]
+
+    @action(detail=False, methods=['post'], url_path='set-value')
+    def set_value(self, request):
+        key = request.data.get('key')
+        value = request.data.get('value')
+        description = request.data.get('description', '')
+        if not key:
+            return Response({'detail': 'key is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        config, created = SystemConfig.objects.update_or_create(
+            key=key,
+            defaults={'value': value, 'description': description}
+        )
+        return Response({'success': True, 'key': config.key, 'value': config.value})
 
     def retrieve(self, request, *args, **kwargs):
         key = self.kwargs.get('key')

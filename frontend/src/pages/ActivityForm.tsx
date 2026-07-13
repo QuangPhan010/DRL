@@ -56,6 +56,7 @@ export default function ActivityForm() {
   const [selectedClasses, setSelectedClasses] = useState<number[]>([]);
   const [selectedClubs, setSelectedClubs] = useState<number[]>([]);
   const [isRegistrationRequired, setIsRegistrationRequired] = useState(false);
+  const [isSoldierCardEnabled, setIsSoldierCardEnabled] = useState(false);
   const [registrationStartDate, setRegistrationStartDate] = useState(getLocalToday);
   const [registrationStartTime, setRegistrationStartTime] = useState("08:00");
   const [registrationEndDate, setRegistrationEndDate] = useState(getLocalToday);
@@ -127,6 +128,7 @@ export default function ActivityForm() {
             setSelectedClasses(act.allowed_classes || []);
             setSelectedClubs(act.allowed_clubs || []);
             setIsRegistrationRequired(!!act.is_registration_required);
+            setIsSoldierCardEnabled(!!act.is_soldier_card_enabled);
             setRoomId(act.room ? String(act.room) : "none");
             setScope(act.is_external ? "external" : "internal");
             setLocation(act.location || "");
@@ -263,7 +265,8 @@ export default function ActivityForm() {
           registration_end: isRegistrationRequired && registrationEndDate && registrationEndTime ? new Date(`${registrationEndDate}T${registrationEndTime}:00`).toISOString() : null,
           room: roomId && roomId !== "none" ? Number(roomId) : null,
           is_external: scope === "external",
-          location: scope === "external" ? location : ""
+          location: scope === "external" ? location : "",
+          is_soldier_card_enabled: isSoldierCardEnabled
         })
       });
 
@@ -615,6 +618,20 @@ export default function ActivityForm() {
                       />
                       <Label htmlFor="isRegistrationRequired" className="cursor-pointer text-sm font-medium">
                         Cho phép sinh viên đăng ký trước?
+                      </Label>
+                    </div>
+
+                    {/* Generate Soldier Card Checkbox */}
+                    <div className="flex items-center space-x-2 border-t pt-4">
+                      <input
+                        type="checkbox"
+                        id="isSoldierCardEnabled"
+                        checked={isSoldierCardEnabled}
+                        onChange={(e) => setIsSoldierCardEnabled(e.target.checked)}
+                        className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4"
+                      />
+                      <Label htmlFor="isSoldierCardEnabled" className="cursor-pointer text-sm font-medium flex items-center gap-1">
+                        🎖️ Tạo thẻ chiến sĩ tình nguyện Mùa Hè Xanh?
                       </Label>
                     </div>
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -13,7 +13,6 @@ const Login = lazy(() => import("./pages/Login"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Students = lazy(() => import("./pages/Students"));
 const Approvals = lazy(() => import("./pages/Approvals"));
-const MyScores = lazy(() => import("./pages/MyScores"));
 const Criteria = lazy(() => import("./pages/Criteria"));
 const SettingsPage = lazy(() => import("./pages/Settings"));
 const Activities = lazy(() => import("./pages/Activities"));
@@ -37,7 +36,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
-      <Sonner />
+      <Sonner position="top-right" />
       <AuthProvider>
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Suspense fallback={<Loading />}>
@@ -50,7 +49,7 @@ const App = () => (
                 <Route path="/students" element={<Classes />} />
                 <Route path="/classes" element={<Classes />} />
                 <Route path="/approvals" element={<Approvals />} />
-                <Route path="/my-scores" element={<MyScores />} />
+                <Route path="/my-scores" element={<Navigate to="/" replace />} />
                 <Route path="/criteria" element={<Criteria />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/activities" element={<Activities />} />

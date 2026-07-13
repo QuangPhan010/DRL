@@ -92,7 +92,47 @@ def validate_evaluation_write_access(*, evaluation, user, client_version=None, r
     is_student = user.role == 'student' or getattr(user, 'student_profile', None) is not None
     
     if is_student and not is_admin:
-        if evaluation.status not in ('draft', 'rejected'):
+        from ..models import SystemConfig
+        import datetime
+        from django.utils import timezone
+        
+        start_config = SystemConfig.objects.filter(key='self_assessment_start').first()
+        if start_config and start_config.value:
+            try:
+                val = start_config.value
+                if len(val) == 10:
+                    start_date = timezone.make_aware(timezone.datetime.strptime(val, "%Y-%m-%d"))
+                else:
+                    start_date = timezone.datetime.fromisoformat(val)
+                    if timezone.is_naive(start_date):
+                        start_date = timezone.make_aware(start_date)
+                
+                if timezone.now() < start_date:
+                    raise WorkflowLockedException(f"Thời gian tự đánh giá chưa bắt đầu. Thời gian mở: {val}")
+            except WorkflowLockedException:
+                raise
+            except Exception:
+                pass
+
+        deadline_config = SystemConfig.objects.filter(key='self_assessment_deadline').first()
+        if deadline_config and deadline_config.value:
+            try:
+                val = deadline_config.value
+                if len(val) == 10:
+                    deadline_date = timezone.make_aware(timezone.datetime.strptime(val, "%Y-%m-%d") + datetime.timedelta(days=1))
+                else:
+                    deadline_date = timezone.datetime.fromisoformat(val)
+                    if timezone.is_naive(deadline_date):
+                        deadline_date = timezone.make_aware(deadline_date)
+                
+                if timezone.now() > deadline_date:
+                    raise WorkflowLockedException(f"Đã quá hạn tự đánh giá rèn luyện. Hạn cuối: {val}")
+            except WorkflowLockedException:
+                raise
+            except Exception:
+                pass
+
+        if evaluation.status not in ('published', 'rejected'):
             log_audit(
                 user=user,
                 action='Workflow Locked',
@@ -106,17 +146,17 @@ def validate_evaluation_write_access(*, evaluation, user, client_version=None, r
                 f"Phiếu tự đánh giá đã bị khóa (Trạng thái hiện tại: {evaluation.get_status_display()}). Không thể chỉnh sửa."
             )
 
-    if evaluation.status == 'approved' and not is_admin:
+    if evaluation.status in ('approved', 'locked') and not is_admin:
         log_audit(
             user=user,
             action='Workflow Locked',
             entity_id=evaluation.id,
-            before_value='approved',
+            before_value=evaluation.status,
             after_value='unauthorized_edit_attempt',
             request=request
         )
-        logger.warning(f"Workflow lock violation attempt on approved Evaluation {evaluation.id} by {user.username}.")
-        raise WorkflowLockedException('Phiếu đánh giá đã được phê duyệt hoàn tất và không thể chỉnh sửa.')
+        logger.warning(f"Workflow lock violation attempt on {evaluation.status} Evaluation {evaluation.id} by {user.username}.")
+        raise WorkflowLockedException(f"Phiếu đánh giá đã ở trạng thái '{evaluation.get_status_display()}' và không thể chỉnh sửa.")
 
     # 5. Log Admin Override
     if is_admin and evaluation.status not in ('draft', 'rejected'):

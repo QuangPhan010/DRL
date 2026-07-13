@@ -18,7 +18,6 @@ interface NavItem { title: string; url: string; icon: any; roles: Role[]; }
 const navItems: NavItem[] = [
   // 1. Tổng quan & Cá nhân
   { title: "Tổng quan", url: "/", icon: LayoutDashboard, roles: ["admin", "advisor", "student", "organizer", "class_monitor", "student_affairs", "academic_affairs"] },
-  { title: "Điểm của tôi", url: "/my-scores", icon: UserIcon, roles: ["student"] },
 
   // 2. Tiêu chí & Phiên đánh giá (Cấu hình đợt đánh giá)
   { title: "Tiêu chí đánh giá", url: "/criteria", icon: Sparkles, roles: ["admin", "student_affairs", "student", "class_monitor", "advisor", "organizer", "academic_affairs"] },

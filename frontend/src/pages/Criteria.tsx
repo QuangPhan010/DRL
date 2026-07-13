@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Criterion, CriteriaSet, GroupCriterion } from "@/lib/mock-data";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -39,6 +40,16 @@ const mutationHeaders = () => {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {})
   };
+};
+
+const getAcademicYears = () => {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const years = [];
+  for (let i = -3; i <= 3; i++) {
+    years.push(`${currentYear + i}-${currentYear + i + 1}`);
+  }
+  return years;
 };
 
 export default function Criteria() {
@@ -229,7 +240,7 @@ export default function Criteria() {
       fetchMyEvaluation(selectedSetId);
     }
   }, [selectedSetId, user]);
-  
+
   // Form states matching 3-level structure
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
@@ -470,7 +481,7 @@ export default function Criteria() {
 
   const save = async () => {
     if (!name) { toast.error("Vui lòng nhập tên tiêu chí lớn"); return; }
-    
+
     // Parse raw string state to number in subitems
     groups.forEach(g => {
       g.subItems.forEach(s => {
@@ -586,22 +597,22 @@ export default function Criteria() {
 
           <div className="space-y-2 border-t pt-3">
             <Label className="text-xs text-muted-foreground">Số ĐT liên lạc:</Label>
-            <Input 
-              value={studentPhone} 
-              onChange={(e) => setStudentPhone(e.target.value)} 
-              placeholder="Nhập số điện thoại liên lạc..." 
+            <Input
+              value={studentPhone}
+              onChange={(e) => setStudentPhone(e.target.value)}
+              placeholder="Nhập số điện thoại liên lạc..."
               className="h-8 text-xs bg-background"
             />
           </div>
 
           <div className="space-y-2 pt-2">
-            <Button 
+            <Button
               className="w-full bg-[#1e74a4] hover:bg-[#1e74a4]/90 text-white text-xs h-9 font-semibold shadow-sm"
               onClick={() => toast.success("Đã xác nhận kết quả đánh giá")}
             >
               Xác nhận kết quả đánh giá
             </Button>
-            <Button 
+            <Button
               className="w-full border border-sky-600 bg-transparent text-sky-700 hover:bg-sky-50/50 text-xs h-9 font-semibold"
               onClick={() => toast.info("Đã gửi phản hồi. Phòng Công tác Sinh viên sẽ rà soát lại.")}
             >
@@ -696,7 +707,7 @@ export default function Criteria() {
               </div>
               <div className="flex gap-2">
                 {selectedSet && canEdit && (
-                  <Button variant="outline" onClick={openEditSet} className="gap-2 border-amber-500 text-amber-600 hover:bg-amber-50/50">
+                  <Button variant="outline" onClick={openEditSet} className="gap-2 border-amber-500 text-amber-600 hover:bg-amber-50/50 hover:text-amber-700">
                     <Edit className="h-4 w-4" />Sửa thông tin
                   </Button>
                 )}
@@ -832,16 +843,16 @@ export default function Criteria() {
                   <Tabs defaultValue={criteria[0]?.id} className="w-full space-y-6">
                     <TabsList className="bg-muted/60 p-1 w-full flex flex-wrap h-auto gap-1 justify-start border border-primary/10 rounded-xl">
                       {criteria.map(c => (
-                        <TabsTrigger 
-                          key={c.id} 
-                          value={c.id} 
+                        <TabsTrigger
+                          key={c.id}
+                          value={c.id}
                           className="gap-2 px-4 py-2 text-sm font-semibold rounded-lg data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm"
                         >
                           Mục {c.code}
                         </TabsTrigger>
                       ))}
                     </TabsList>
-                    
+
                     {criteria.map(c => {
                       const userScore = myEvaluation?.scores?.[c.id.toString()] ?? 0;
                       return (
@@ -917,7 +928,7 @@ export default function Criteria() {
       ) : (
         <Card className="border-0 shadow-md">
           <CardHeader>
-            <CardTitle className="font-display">Danh sách tiêu chí đánh giá (Theo Sheet)</CardTitle>
+            <CardTitle className="font-display">Danh sách tiêu chí đánh giá</CardTitle>
             <CardDescription>Tiêu chí lớn (Cấp 1) → Nhóm tiêu chí (Cấp 2) → Tiêu chí chi tiết điểm cộng/trừ (Cấp 3)</CardDescription>
           </CardHeader>
           <CardContent>
@@ -985,16 +996,16 @@ export default function Criteria() {
                 <Tabs defaultValue={criteria[0]?.id} className="w-full space-y-6">
                   <TabsList className="bg-muted/60 p-1 w-full flex flex-wrap h-auto gap-1 justify-start border border-primary/10 rounded-xl">
                     {criteria.map(c => (
-                      <TabsTrigger 
-                        key={c.id} 
-                        value={c.id} 
+                      <TabsTrigger
+                        key={c.id}
+                        value={c.id}
                         className="gap-2 px-4 py-2 text-sm font-semibold rounded-lg data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm"
                       >
                         Mục {c.code}
                       </TabsTrigger>
                     ))}
                   </TabsList>
-                  
+
                   {criteria.map(c => {
                     return (
                       <TabsContent key={c.id} value={c.id} className="space-y-4">
@@ -1087,7 +1098,7 @@ export default function Criteria() {
               {isEditingSet ? "Chỉnh sửa thông tin bộ tiêu chí" : "Tạo bộ tiêu chí mới"}
             </DialogTitle>
             <DialogDescription>
-              {isEditingSet 
+              {isEditingSet
                 ? "Cập nhật tên, học kỳ, năm học và thời gian hiệu lực cho bộ tiêu chí này."
                 : "Khai báo thời gian sử dụng. Sau khi kiểm tra cấu trúc, quản trị viên có thể chọn “Dùng bộ này”."}
             </DialogDescription>
@@ -1111,7 +1122,14 @@ export default function Criteria() {
               </div>
               <div className="space-y-2">
                 <Label>Năm học</Label>
-                <Input value={setAcademicYear} onChange={event => setSetAcademicYear(event.target.value)} placeholder="2026-2027" />
+                <Select value={setAcademicYear} onValueChange={setSetAcademicYear}>
+                  <SelectTrigger><SelectValue placeholder="Chọn năm học" /></SelectTrigger>
+                  <SelectContent>
+                    {getAcademicYears().map((year) => (
+                      <SelectItem key={year} value={year}>{year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -1245,11 +1263,11 @@ export default function Criteria() {
                         {g.subItems.map((s, sIdx) => (
                           <div key={s.id} className="flex gap-2 items-center">
                             <Input className="flex-1 text-sm h-8" placeholder="a. Có ý thức đi học đầy đủ..." value={s.name} onChange={e => updateSubItemName(g.id, s.id, e.target.value)} />
-                            <Input 
-                              className="w-[85px] text-sm h-8 font-mono text-center" 
-                              type="text" 
-                              placeholder="Điểm" 
-                              value={s.maxScore} 
+                            <Input
+                              className="w-[85px] text-sm h-8 font-mono text-center"
+                              type="text"
+                              placeholder="Điểm"
+                              value={s.maxScore}
                               onChange={e => {
                                 const val = e.target.value;
                                 if (val === "" || val === "-") {
@@ -1257,7 +1275,7 @@ export default function Criteria() {
                                 } else {
                                   updateSubItemScore(g.id, s.id, parseInt(val) || 0);
                                 }
-                              }} 
+                              }}
                             />
                             <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive shrink-0" onClick={() => removeSubItem(g.id, s.id)}>
                               <Trash2 className="h-3.5 w-3.5" />

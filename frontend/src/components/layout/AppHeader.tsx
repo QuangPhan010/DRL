@@ -102,7 +102,7 @@ export function AppHeader() {
         navigate("/approvals");
       }
     } else if (titleLower.includes("được duyệt") || titleLower.includes("trả lại") || titleLower.includes("công bố")) {
-      navigate("/my-scores");
+      navigate("/");
     }
   };
 
@@ -204,7 +204,7 @@ export function AppHeader() {
             title: `${evaluation.semester} ${evaluation.year} · ${evaluation.total_score} điểm`,
             subtitle: `${evaluation.student_id} · ${evaluation.student_name}`,
             target: user?.role === "student"
-              ? "/my-scores"
+              ? "/"
               : `/approvals?search=${encodeURIComponent(evaluation.student_id)}`,
           })) : [];
 

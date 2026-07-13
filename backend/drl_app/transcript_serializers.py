@@ -22,6 +22,7 @@ class TranscriptImportItemSerializer(serializers.ModelSerializer):
             'status',
             'match_status',
             'remark',
+            'absent_sessions',
         )
 
     def get_resolved_full_name(self, obj):

@@ -228,11 +228,13 @@ class SubItem(models.Model):
 class Evaluation(models.Model):
     STATUS_CHOICES = (
         ('draft', 'Nháp'),
+        ('published', 'Đã công bố'),
         ('class_pending', 'Chờ cán sự rà soát'),
         ('advisor_pending', 'Chờ cố vấn duyệt'),
         ('pending', 'Chờ duyệt cấp trường'),
         ('approved', 'Đã duyệt hoàn tất'),
         ('rejected', 'Bị từ chối'),
+        ('locked', 'Đã khóa'),
     )
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='evaluations')
     criteria_set = models.ForeignKey(CriteriaSet, on_delete=models.PROTECT, null=True, blank=True, related_name='evaluations')
@@ -352,6 +354,7 @@ class Activity(models.Model):
     is_registration_required = models.BooleanField(default=False)
     registration_start = models.DateTimeField(null=True, blank=True)
     registration_end = models.DateTimeField(null=True, blank=True)
+    is_soldier_card_enabled = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'activity'
@@ -598,6 +601,7 @@ class TranscriptImportItem(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
     match_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='MATCHED')
     remark = models.CharField(max_length=255, blank=True, default="")
+    absent_sessions = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = 'transcript_import_item'
@@ -676,6 +680,28 @@ class ReportJob(models.Model):
 
     def __str__(self):
         return f"Job #{self.id} - {self.report_definition.name} ({self.status})"
+
+
+class EvaluationJob(models.Model):
+    STATUS_CHOICES = (
+        ('PENDING', 'Pending'),
+        ('RUNNING', 'Running'),
+        ('SUCCESS', 'Success'),
+        ('FAILED', 'Failed'),
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    progress = models.IntegerField(default=0)
+    total = models.IntegerField(default=0)
+    error_message = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'evaluation_job'
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f"EvaluationJob #{self.id} ({self.status}) - {self.progress}/{self.total}"
 
 
 

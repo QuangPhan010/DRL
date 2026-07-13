@@ -127,3 +127,135 @@ def save_evaluation_draft_bulk(*, evaluation, scores_data, note=None, user=None,
         'classification': evaluation.classification,
         'serverVersion': evaluation.version
     }
+
+
+import threading
+from django import db
+from ..models import EvaluationJob, Evaluation, Student, CriteriaSet, SubItem, EvaluationDetail
+from ..views import sync_evaluation_with_transcript, recalculate_evaluation_score, rebalance_training_score
+
+def async_bulk_init_evaluations(job_id, payload_data):
+    """
+    Background worker to create/update evaluations for students in chunks.
+    """
+    db.close_old_connections()
+    try:
+        job = EvaluationJob.objects.get(id=job_id)
+        job.status = 'RUNNING'
+        job.save()
+
+        total = len(payload_data)
+        completed = 0
+        batch_size = 50 # Small batches to avoid SQLite locks
+
+        # Group data into batches
+        batches = [payload_data[i:i + batch_size] for i in range(0, total, batch_size)]
+
+        for batch in batches:
+            with transaction.atomic():
+                for row in batch:
+                    student_id = row.get('studentId') or row.get('student_id')
+                    try:
+                        student = Student.objects.get(student_id=student_id)
+                    except Student.DoesNotExist:
+                        continue
+                    semester = row.get('semester')
+                    year = row.get('year')
+                    scores_data = row.get('scores', {})
+                    note = row.get('note', '')
+                    academic_gpa = row.get('academicGpa') or row.get('academic_gpa')
+                    academic_classification = row.get('academicClassification') or row.get('academic_classification', '')
+                    requested_raw_score = row.get('rawScore') or row.get('raw_score')
+                    requested_set_id = row.get('criteriaSet') or row.get('criteria_set')
+
+                    if requested_set_id:
+                        try:
+                            criteria_set = CriteriaSet.objects.get(pk=requested_set_id)
+                        except CriteriaSet.DoesNotExist:
+                            continue
+                    else:
+                        criteria_set = (
+                            CriteriaSet.objects.filter(semester=semester, academic_year=year, is_active=True).first()
+                            or CriteriaSet.objects.filter(is_active=True).first()
+                        )
+
+                    if not criteria_set:
+                        continue
+
+                    # Create or update evaluation
+                    evaluation, created = Evaluation.objects.update_or_create(
+                        student=student, semester=semester, year=year,
+                        defaults={
+                            'note': note,
+                            'academic_gpa': academic_gpa if academic_gpa not in ('', None) else None,
+                            'academic_classification': academic_classification or '',
+                            'status': 'draft',
+                            'class_confirmed': False,
+                            'criteria_set': criteria_set,
+                        }
+                    )
+
+                    # Clear old details
+                    evaluation.details.all().delete()
+
+                    # Write new details and calculate total score
+                    detail_objects = []
+                    for sub_item_id, score_val in scores_data.items():
+                        try:
+                            sub_item = SubItem.objects.get(
+                                id=int(sub_item_id),
+                                group__criterion__criteria_set=criteria_set
+                            )
+                            detail_objects.append(
+                                EvaluationDetail(
+                                    evaluation=evaluation,
+                                    sub_item=sub_item,
+                                    score=score_val
+                                )
+                            )
+                        except (SubItem.DoesNotExist, ValueError):
+                            pass
+                    
+                    if detail_objects:
+                        EvaluationDetail.objects.bulk_create(detail_objects)
+
+                    sync_evaluation_with_transcript(evaluation)
+                    recalculate_evaluation_score(evaluation)
+                    if requested_raw_score not in (None, ''):
+                        requested_total = int(float(requested_raw_score))
+                        if requested_total > evaluation.raw_score:
+                            evaluation.raw_score = requested_total
+                            evaluation.save(update_fields=('raw_score',))
+                    rebalance_training_score(student)
+                    completed += 1
+
+            # Save progress in database
+            job.progress = completed
+            job.save()
+
+        job.status = 'SUCCESS'
+        job.save()
+
+    except Exception as e:
+        try:
+            job = EvaluationJob.objects.get(id=job_id)
+            job.status = 'FAILED'
+            job.error_message = str(e)
+            job.save()
+        except Exception:
+            pass
+    finally:
+        db.close_old_connections()
+
+
+def launch_bulk_init_job(payload_data):
+    """
+    Creates a new EvaluationJob and starts a background thread.
+    """
+    job = EvaluationJob.objects.create(
+        status='PENDING',
+        progress=0,
+        total=len(payload_data)
+    )
+    threading.Thread(target=async_bulk_init_evaluations, args=(job.id, payload_data), daemon=True).start()
+    return job

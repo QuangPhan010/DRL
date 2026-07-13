@@ -6,7 +6,7 @@ import time
 import threading
 from django.core.cache import cache
 
-from .models import AuditLog, ClassInfo, TranscriptImport, TranscriptImportItem
+from .models import AuditLog, ClassInfo, TranscriptImport, TranscriptImportItem, Student
 from .services.transcript_statistics import build_summary
 from .services.transcript_validator import validate_transcript_upload
 from .transcript_serializers import TranscriptImportDetailSerializer, TranscriptImportListSerializer
@@ -269,3 +269,106 @@ class TranscriptImportViewSet(viewsets.ModelViewSet):
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
         return response
+
+    @action(detail=False, methods=["post"], url_path="import-attendance")
+    def import_attendance(self, request):
+        class_id = request.data.get("class_id") or request.data.get("classId")
+        school_year = (request.data.get("school_year") or request.data.get("schoolYear") or "").strip()
+        semester = (request.data.get("semester") or "").strip() or None
+        student_attendances = request.data.get("student_attendances", [])
+
+        if not class_id:
+            return Response({"error": "class_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not school_year:
+            return Response({"error": "school_year is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not semester:
+            return Response({"error": "semester is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(student_attendances, list):
+            return Response({"error": "student_attendances must be a list."}, status=status.HTTP_400_BAD_REQUEST)
+
+        selected_class = ClassInfo.objects.filter(id=class_id).first()
+        if not selected_class:
+            return Response({"error": "Selected class was not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            import_record, created = TranscriptImport.objects.get_or_create(
+                class_info=selected_class,
+                semester=semester,
+                school_year=school_year,
+                defaults={
+                    "status": "IMPORTED",
+                    "class_name": selected_class.name,
+                    "original_filename": "Imported Attendance",
+                }
+            )
+            # Ensure the status is set to IMPORTED if we are updating a draft/validated record
+            if import_record.status != "IMPORTED":
+                import_record.status = "IMPORTED"
+                import_record.save(update_fields=["status"])
+
+            success_count = 0
+            failed_codes = []
+
+            for item in student_attendances:
+                student_code = str(item.get("student_code") or item.get("student_id") or "").strip()
+                if not student_code:
+                    continue
+                try:
+                    absent_sessions = int(item.get("absent_sessions") or item.get("absent") or 0)
+                except (ValueError, TypeError):
+                    absent_sessions = 0
+
+                student = Student.objects.filter(student_id__iexact=student_code).first()
+                
+                import_item, item_created = TranscriptImportItem.objects.get_or_create(
+                    transcript_import=import_record,
+                    student_code=student_code,
+                    defaults={
+                        "student": student,
+                        "full_name": student.full_name if student else "",
+                        "gpa": 0.0,
+                        "classification": "Trung bình",
+                        "status": "MATCHED" if student else "NOT_FOUND",
+                        "match_status": "MATCHED" if student else "NOT_FOUND",
+                        "absent_sessions": absent_sessions,
+                    }
+                )
+                if not item_created:
+                    import_item.absent_sessions = absent_sessions
+                    if student and not import_item.student:
+                        import_item.student = student
+                        import_item.status = "MATCHED"
+                        import_item.match_status = "MATCHED"
+                    import_item.save()
+                
+                success_count += 1
+
+            # Recalculate summary data
+            items = import_record.items.all()
+            items_payload = []
+            for item in items:
+                items_payload.append({
+                    "id": item.id,
+                    "student": item.student.id if item.student else None,
+                    "student_code": item.student_code,
+                    "full_name": item.full_name,
+                    "gpa": float(item.gpa),
+                    "classification": item.classification,
+                    "match_status": item.match_status,
+                    "remark": item.remark,
+                })
+            summary_counts, summary_percent, total_cnt = build_summary(items_payload)
+            import_record.total_students = total_cnt
+            import_record.summary_data = {
+                "counts": summary_counts,
+                "percentages": summary_percent,
+                "valid": True,
+                "class_match": True,
+            }
+            import_record.save(update_fields=["total_students", "summary_data"])
+
+        return Response({
+            "message": f"Cập nhật số buổi vắng thành công cho {success_count} sinh viên.",
+            "success_count": success_count,
+            "failed_codes": failed_codes
+        })

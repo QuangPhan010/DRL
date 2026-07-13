@@ -72,12 +72,13 @@ export default function Approvals() {
     e.semester,
     e.year,
   ].join(" ")).includes(globalSearch));
+  const drafts = visibleEvals.filter(e => e.status === "draft" || e.status === "published");
   const pending = visibleEvals.filter(e => {
     if (isAdvisor) return e.status === "advisor_pending";
-    if (isAffairs) return e.status === "pending";
-    return e.status === "pending" || e.status === "advisor_pending";
+    if (isAffairs) return e.status === "pending" || e.status === "class_pending";
+    return e.status === "pending" || e.status === "advisor_pending" || e.status === "class_pending";
   });
-  const approved = visibleEvals.filter(e => e.status === "approved");
+  const approved = visibleEvals.filter(e => e.status === "approved" || e.status === "locked");
   const rejected = visibleEvals.filter(e => e.status === "rejected");
 
   const decide = async (id: number, statusParam: "approved" | "rejected" | "pending") => {
@@ -113,9 +114,59 @@ export default function Approvals() {
     }
   };
 
-  const handleLockResults = () => {
-    setLocked(true);
-    toast.success("Đã khóa kết quả điểm rèn luyện Học kỳ 1 2024-2025!");
+  const handlePublishResults = async () => {
+    if (!visibleEvals.length) return;
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers = {
+        "Content-Type": "application/json",
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+      };
+      const res = await fetch(`${API_URL}/evaluations/bulk-update-status/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          status: "published",
+          evaluationIds: visibleEvals.map(e => e.id)
+        })
+      });
+      if (res.ok) {
+        toast.success(`Đã công công bố thành công ${visibleEvals.length} phiếu rèn luyện cho sinh viên!`);
+        fetchEvalsAndCriteria();
+      } else {
+        toast.error("Không thể công công bố phiếu rèn luyện");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối");
+    }
+  };
+
+  const handleLockResults = async () => {
+    if (!visibleEvals.length) return;
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers = {
+        "Content-Type": "application/json",
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+      };
+      const res = await fetch(`${API_URL}/evaluations/bulk-update-status/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          status: "locked",
+          evaluationIds: visibleEvals.map(e => e.id)
+        })
+      });
+      if (res.ok) {
+        setLocked(true);
+        toast.success(`Đã khóa thành công ${visibleEvals.length} phiếu rèn luyện!`);
+        fetchEvalsAndCriteria();
+      } else {
+        toast.error("Không thể khóa phiếu rèn luyện");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối");
+    }
   };
 
   const handleExportReport = () => {
@@ -199,6 +250,9 @@ export default function Approvals() {
             <Button variant="outline" className="gap-2 border-primary/20" onClick={handleExportReport}>
               <FileDown className="h-4 w-4" />Xuất báo cáo chính thức
             </Button>
+            <Button disabled={locked} onClick={handlePublishResults} className="bg-success text-success-foreground hover:bg-success/90 gap-2">
+              <Eye className="h-4 w-4" />Công bố phiếu cho sinh viên
+            </Button>
             <Button disabled={locked} onClick={handleLockResults} className="bg-destructive text-destructive-foreground hover:bg-destructive/90 gap-2">
               <Lock className="h-4 w-4" />{locked ? "Đã khóa kết quả" : "Khóa kết quả cuối cùng"}
             </Button>
@@ -222,12 +276,14 @@ export default function Approvals() {
         ))}
       </div>
 
-      <Tabs defaultValue="pending">
-        <TabsList className="grid grid-cols-3 w-full md:w-fit">
+      <Tabs defaultValue="drafts">
+        <TabsList className="grid grid-cols-4 w-full md:w-fit">
+          <TabsTrigger value="drafts" className="text-[10px] sm:text-sm px-1">Nháp & Công bố ({drafts.length})</TabsTrigger>
           <TabsTrigger value="pending" className="text-[10px] sm:text-sm px-1">Chờ duyệt ({pending.length})</TabsTrigger>
-          <TabsTrigger value="approved" className="text-[10px] sm:text-sm px-1">Đã duyệt ({approved.length})</TabsTrigger>
-          <TabsTrigger value="rejected" className="text-[10px] sm:text-sm px-1">Từ chối / Bổ sung ({rejected.length})</TabsTrigger>
+          <TabsTrigger value="approved" className="text-[10px] sm:text-sm px-1">Đã duyệt & Khóa ({approved.length})</TabsTrigger>
+          <TabsTrigger value="rejected" className="text-[10px] sm:text-sm px-1">Từ chối ({rejected.length})</TabsTrigger>
         </TabsList>
+        <TabsContent value="drafts" className="mt-4">{renderTable(drafts)}</TabsContent>
         <TabsContent value="pending" className="mt-4">{renderTable(pending)}</TabsContent>
         <TabsContent value="approved" className="mt-4">{renderTable(approved)}</TabsContent>
         <TabsContent value="rejected" className="mt-4">{renderTable(rejected)}</TabsContent>
