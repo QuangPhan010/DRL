@@ -80,8 +80,10 @@ def save_evaluation_draft_bulk(*, evaluation, scores_data, note=None, user=None,
             for sub_item_id, (sub_item, score) in valid_scores_to_process.items():
                 if sub_item_id in existing_details_dict:
                     detail = existing_details_dict[sub_item_id]
-                    if detail.score != score:
+                    if detail.score != score or detail.is_rejected:
                         detail.score = score
+                        detail.is_rejected = False
+                        detail.reject_reason = None
                         bulk_updates.append(detail)
                         autosave_count += 1
                         has_changes = True
@@ -89,7 +91,9 @@ def save_evaluation_draft_bulk(*, evaluation, scores_data, note=None, user=None,
                     detail = EvaluationDetail(
                         evaluation=evaluation,
                         sub_item=sub_item,
-                        score=score
+                        score=score,
+                        is_rejected=False,
+                        reject_reason=None
                     )
                     bulk_creates.append(detail)
                     autosave_count += 1
@@ -98,7 +102,7 @@ def save_evaluation_draft_bulk(*, evaluation, scores_data, note=None, user=None,
             if bulk_creates:
                 EvaluationDetail.objects.bulk_create(bulk_creates)
             if bulk_updates:
-                EvaluationDetail.objects.bulk_update(bulk_updates, fields=['score'])
+                EvaluationDetail.objects.bulk_update(bulk_updates, fields=['score', 'is_rejected', 'reject_reason'])
 
         # Save evaluation note if modified
         if note is not None and evaluation.note != note:
@@ -189,7 +193,7 @@ def async_bulk_init_evaluations(job_id, payload_data):
                             'note': note,
                             'academic_gpa': academic_gpa if academic_gpa not in ('', None) else None,
                             'academic_classification': academic_classification or '',
-                            'status': 'draft',
+                            'status': 'published',
                             'class_confirmed': False,
                             'criteria_set': criteria_set,
                         }
@@ -228,6 +232,86 @@ def async_bulk_init_evaluations(job_id, payload_data):
                             evaluation.save(update_fields=('raw_score',))
                     rebalance_training_score(student)
                     completed += 1
+                    
+                    try:
+                        from drl_app.models import User, SystemConfig
+                        from drl_app.views import create_notification
+                        from django.core.mail import send_mail
+                        from django.conf import settings
+
+                        student_user = User.objects.filter(student_id=student.student_id).first()
+                        if student_user:
+                            create_notification(
+                                user=student_user,
+                                title="Mở đợt đánh giá rèn luyện mới",
+                                message=f"Hệ thống đã mở đợt tự đánh giá rèn luyện cho HK{semester} {year}. Vui lòng tự chấm điểm của bạn trước hạn chót.",
+                                type='evaluation',
+                                level='info',
+                                action_url='/'
+                            )
+                        
+                        if student.email:
+                            start_date = SystemConfig.objects.filter(key='self_assessment_start').first()
+                            deadline_date = SystemConfig.objects.filter(key='self_assessment_deadline').first()
+                            start_val = start_date.value if start_date else "Chưa cấu hình"
+                            deadline_val = deadline_date.value if deadline_date else "Chưa cấu hình"
+                            
+                            email_subject = f"[ITC Point] Thông báo tự đánh giá điểm rèn luyện HK{semester} {year}"
+                            email_message = f"Chào {student.full_name},\n\nCổng tự đánh giá điểm rèn luyện trực tuyến đã chính thức được mở cho HK{semester} năm học {year}.\nVui lòng đăng nhập và thực hiện tự đánh giá trước hạn chót: {deadline_val}."
+                            
+                            email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #6366f1, #a855f7); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Thông Báo Đánh Giá ĐRL</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Bắt đầu đợt tự đánh giá điểm rèn luyện</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">Chào {student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px; margin-top: 12px;">Hệ thống thông báo: Cổng tự đánh giá điểm rèn luyện trực tuyến đã chính thức được mở. Vui lòng truy cập hệ thống để hoàn thành phiếu tự chấm điểm rèn luyện cá nhân:</p>
+    
+    <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #f1f5f9; border-left: 4px solid #6366f1;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 150px; text-transform: uppercase; letter-spacing: 0.5px;">Học kỳ / Năm học:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">HK{semester} - Năm học {year}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Ngày mở cổng:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500;">{start_val}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Hạn cuối tự chấm:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #ef4444; font-weight: 700;">{deadline_val}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 36px 0 28px 0;">
+      <a href="http://localhost:8080/" style="background: linear-gradient(135deg, #6366f1, #a855f7); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3); letter-spacing: -0.2px;">Thực hiện tự đánh giá</a>
+    </div>
+
+    <div style="background-color: #fef2f2; border-radius: 8px; padding: 14px 18px; border: 1px solid #fee2e2; margin-top: 24px;">
+      <p style="color: #b91c1c; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+        * Lưu ý: Sau thời hạn nêu trên, hệ thống sẽ tự động đóng. Những sinh viên không tự chấm điểm sẽ nhận điểm 0 rèn luyện cho học kỳ này.
+      </p>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px; line-height: 1.5;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                            send_mail(
+                                email_subject,
+                                email_message,
+                                getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                                [student.email],
+                                fail_silently=False,
+                                html_message=email_html
+                            )
+                    except Exception as notif_err:
+                        print(f"Error creating bulk notification or sending email: {notif_err}")
 
             # Save progress in database
             job.progress = completed

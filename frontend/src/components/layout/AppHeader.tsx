@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bell, FileCheck, Loader2, LogOut, Search, User as UserIcon } from "lucide-react";
+import { Bell, FileCheck, Loader2, LogOut, Search, User as UserIcon, AlertTriangle, Award, ShieldAlert } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -94,15 +94,19 @@ export function AppHeader() {
 
   const handleNotificationClick = (n: any) => {
     markAsRead(n.id);
-    const titleLower = n.title.toLowerCase();
-    if (titleLower.includes("cần duyệt") || titleLower.includes("chờ phê duyệt") || titleLower.includes("chờ duyệt")) {
-      if (user?.role === "class_monitor") {
-        navigate("/class-review");
-      } else {
-        navigate("/approvals");
+    if (n.action_url) {
+      navigate(n.action_url);
+    } else {
+      const titleLower = n.title.toLowerCase();
+      if (titleLower.includes("cần duyệt") || titleLower.includes("chờ phê duyệt") || titleLower.includes("chờ duyệt")) {
+        if (user?.role === "class_monitor") {
+          navigate("/class-review");
+        } else {
+          navigate("/approvals");
+        }
+      } else if (titleLower.includes("được duyệt") || titleLower.includes("trả lại") || titleLower.includes("công bố")) {
+        navigate("/");
       }
-    } else if (titleLower.includes("được duyệt") || titleLower.includes("trả lại") || titleLower.includes("công bố")) {
-      navigate("/");
     }
   };
 
@@ -124,8 +128,40 @@ export function AppHeader() {
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 10000);
-    return () => clearInterval(interval);
+
+    const token = localStorage.getItem("drl_token");
+    if (!token) return;
+
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    let host = window.location.host;
+    // If backend is running on a different port/host than frontend, parse API_URL
+    try {
+      const url = new URL(API_URL);
+      host = url.host;
+    } catch (e) {
+      console.warn("Invalid API_URL format, using current host.");
+    }
+
+    const wsUrl = `${wsProto}//${host}/ws/notifications/?token=${token}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setNotifications((prev) => [data, ...prev]);
+        toast.info(`Thông báo mới: ${data.title}`);
+      } catch (err) {
+        console.error("Error parsing websocket message:", err);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log("Notification WebSocket disconnected. Retrying in 5s...");
+    };
+
+    return () => {
+      ws.close();
+    };
   }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([]);
@@ -274,22 +310,54 @@ export function AppHeader() {
               )}
             </div>
             <div className="max-h-80 overflow-auto">
-              {notifications.map(n => (
-                <div 
-                  key={n.id} 
-                  className={`p-4 border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors ${n.unread ? "bg-primary/5" : ""}`}
-                  onClick={() => handleNotificationClick(n)}
-                >
-                  <div className="flex items-start gap-2">
-                    {n.unread && <span className="mt-1.5 h-2 w-2 rounded-full bg-primary shrink-0 animate-pulse" />}
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{n.title}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{n.message}</p>
-                      <p className="text-[10px] text-muted-foreground/80 mt-1 font-mono">{formatTime(n.created_at)}</p>
+              {notifications.map(n => {
+                let IconComponent = Bell;
+                let iconColor = "text-sky-500";
+                let levelBg = "bg-sky-50 dark:bg-sky-950/20";
+                
+                if (n.type === "evaluation") {
+                  IconComponent = FileCheck;
+                  iconColor = "text-emerald-500";
+                } else if (n.type === "activity") {
+                  IconComponent = Award;
+                  iconColor = "text-purple-500";
+                } else if (n.type === "warning") {
+                  IconComponent = ShieldAlert;
+                  iconColor = "text-amber-500";
+                }
+
+                if (n.level === "success") {
+                  levelBg = "bg-emerald-50/50 dark:bg-emerald-950/10";
+                } else if (n.level === "warning") {
+                  levelBg = "bg-amber-50/50 dark:bg-amber-950/10";
+                } else if (n.level === "danger") {
+                  IconComponent = AlertTriangle;
+                  iconColor = "text-rose-500";
+                  levelBg = "bg-rose-50/50 dark:bg-rose-950/10";
+                }
+
+                return (
+                  <div 
+                    key={n.id} 
+                    className={`p-4 border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors ${n.unread ? "bg-primary/5" : ""} ${levelBg}`}
+                    onClick={() => handleNotificationClick(n)}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2 rounded-full shrink-0 ${n.unread ? "bg-background shadow-sm" : "bg-muted"}`}>
+                        <IconComponent className={`h-4 w-4 ${iconColor}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <p className="text-sm font-semibold truncate text-foreground">{n.title}</p>
+                          {n.unread && <span className="h-2 w-2 rounded-full bg-primary shrink-0 animate-pulse" />}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{n.message}</p>
+                        <p className="text-[10px] text-muted-foreground/80 mt-2 font-medium">{formatTime(n.created_at)}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {notifications.length === 0 && (
                 <div className="p-6 text-center text-xs text-muted-foreground">
                   Chưa có thông báo nào dành cho bạn.

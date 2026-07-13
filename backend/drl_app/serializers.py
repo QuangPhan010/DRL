@@ -214,7 +214,7 @@ class EvaluationDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EvaluationDetail
-        fields = ('id', 'sub_item_id', 'sub_item_name', 'score')
+        fields = ('id', 'sub_item_id', 'sub_item_name', 'score', 'is_rejected', 'reject_reason')
 
 class EvaluationSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.full_name', read_only=True)
@@ -443,7 +443,7 @@ class SystemConfigSerializer(serializers.ModelSerializer):
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
-        fields = ('id', 'user', 'title', 'message', 'unread', 'created_at')
+        fields = ('id', 'user', 'title', 'message', 'unread', 'type', 'level', 'action_url', 'created_at')
 
 
 

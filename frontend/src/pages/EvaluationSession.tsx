@@ -94,8 +94,12 @@ const headers = () => {
 
 const getAcademicYears = () => {
   const now = new Date();
-  const base = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
-  return Array.from({ length: 4 }, (_, index) => `${base - 1 + index}-${base + index}`);
+  const base = now.getMonth() + 1 >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  const years = [];
+  for (let y = 2023; y <= base; y++) {
+    years.push(`${y}-${y + 1}`);
+  }
+  return years;
 };
 
 const classifyScore = (score: number) => {
@@ -119,11 +123,10 @@ const classifyAcademicGpa = (gpa: number | null): string => {
 
 const academicPoints = (gpa: number | null) => {
   if (gpa === null) return 0;
-  if (gpa >= 3.6) return 14;
-  if (gpa >= 3.2) return 12;
-  if (gpa >= 2.5) return 10;
-  if (gpa >= 2) return 8;
-  if (gpa >= 1) return 5;
+  if (gpa >= 3.6) return 10;
+  if (gpa >= 3.2) return 8;
+  if (gpa >= 2.5) return 6;
+  if (gpa >= 2.0) return 4;
   return 0;
 };
 
@@ -146,7 +149,8 @@ export default function EvaluationSession() {
   const [faculty, setFaculty] = useState("all");
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
   const [semester, setSemester] = useState("HK1");
-  const [year, setYear] = useState(getAcademicYears()[1]);
+  const yearsList = getAcademicYears();
+  const [year, setYear] = useState(yearsList[yearsList.length - 1] || "");
   const [criteriaSetId, setCriteriaSetId] = useState("");
   const [selfAssessmentStartDate, setSelfAssessmentStartDate] = useState("");
   const [selfAssessmentStartTime, setSelfAssessmentStartTime] = useState("08:00");
@@ -700,9 +704,39 @@ export default function EvaluationSession() {
               <Select value={semester} onValueChange={setSemester}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="HK1">Học kỳ 1</SelectItem>
-                  <SelectItem value="HK2">Học kỳ 2</SelectItem>
-                  <SelectItem value="HK3">Học kỳ 3</SelectItem>
+                  {(() => {
+                    const now = new Date();
+                    const currentYear = now.getMonth() + 1 >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+                    const currentYearStr = `${currentYear}-${currentYear + 1}`;
+                    if (year !== currentYearStr) {
+                      return (
+                        <>
+                          <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                          <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                          <SelectItem value="HK3">Học kỳ 3</SelectItem>
+                        </>
+                      );
+                    }
+                    const month = now.getMonth() + 1;
+                    if (month >= 8 && month <= 12) {
+                      return <SelectItem value="HK1">Học kỳ 1</SelectItem>;
+                    } else if (month >= 1 && month <= 3) {
+                      return (
+                        <>
+                          <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                          <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                        </>
+                      );
+                    } else {
+                      return (
+                        <>
+                          <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                          <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                          <SelectItem value="HK3">Học kỳ 3</SelectItem>
+                        </>
+                      );
+                    }
+                  })()}
                 </SelectContent>
               </Select>
             </div>
@@ -849,16 +883,6 @@ export default function EvaluationSession() {
           <CardDescription>Bảng thống kê số buổi đi học (số buổi có mặt) và số buổi vắng học của sinh viên trong kỳ học.</CardDescription>
         </div>
         <div className="flex items-center gap-3">
-          <Label htmlFor="attendance-csv" className="cursor-pointer bg-primary text-primary-foreground px-3 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 flex items-center gap-1.5 shadow-sm">
-            <UploadCloud className="h-4 w-4" /> Import Điểm danh Lớp học (CSV)
-          </Label>
-          <input
-            type="file"
-            id="attendance-csv"
-            accept=".csv"
-            className="hidden"
-            onChange={handleImportAttendance}
-          />
           <Badge className="bg-success/15 text-success hover:bg-success/15">
             {Object.keys(importedAttendance).length > 0 ? "Đã nhập file" : "Chờ nhập dữ liệu"}
           </Badge>
@@ -921,27 +945,22 @@ export default function EvaluationSession() {
                 const attendedActivities = activities.filter(a =>
                   (a.participants || []).some(p => p.student_id === student.student_id && p.status === "attended")
                 );
-                const custom = importedAttendance[student.student_id];
                 return (
                   <TableRow key={student.id}>
                     <TableCell className="font-mono">{student.student_id}</TableCell>
                     <TableCell className="font-medium">{student.full_name}</TableCell>
                     <TableCell>{student.class_name}</TableCell>
                     <TableCell>
-                      {custom ? (
-                        <div className="text-sm font-semibold text-blue-600">
-                          Đã tham gia {custom.attended} hoạt động (dữ liệu imported)
-                        </div>
-                      ) : attendedActivities.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5">
+                      {attendedActivities.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 max-w-[400px]">
                           {attendedActivities.map((act) => (
-                            <Badge key={act.id} variant="secondary" className="text-[10px] bg-primary/5 text-primary border-primary/20">
+                            <Badge key={act.id} variant="secondary" className="text-[10px] bg-indigo-50 text-indigo-700 dark:bg-indigo-950/20 dark:text-indigo-400 border-indigo-200/50">
                               {act.title}
                             </Badge>
                           ))}
                         </div>
                       ) : (
-                        <span className="text-xs text-muted-foreground">Chưa tham gia hoạt động nào</span>
+                        <span className="text-xs text-muted-foreground">Chưa tham gia hoạt động ngoại khóa nào</span>
                       )}
                     </TableCell>
                   </TableRow>

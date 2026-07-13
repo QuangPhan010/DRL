@@ -64,7 +64,7 @@ export default function Dashboard() {
     const month = now.getMonth() + 1;
     if (month >= 8 && month <= 12) {
       return "HK1";
-    } else if (month >= 1 && month <= 4) {
+    } else if (month >= 1 && month <= 3) {
       return "HK2";
     } else {
       return "HK3";
@@ -108,7 +108,7 @@ export default function Dashboard() {
   const [conflictMessage, setConflictMessage] = useState("");
 
   const latest = evals[evals.length - 1];
-  const editableEval = [...evals].reverse().find(e => e.status === "published" || e.status === "rejected");
+  const editableEval = [...evals].reverse().find(e => e.status === "published" || e.status === "rejected" || e.status === "class_pending");
   const manualCriteria = editableEval
     ? criteria.filter(c => c.criteria_set === editableEval.criteria_set && c.is_manual)
     : [];
@@ -157,7 +157,7 @@ export default function Dashboard() {
   ) => {
     if (!editableEval) return;
 
-    if (editableEval.status !== "draft" && editableEval.status !== "rejected") {
+    if (editableEval.status !== "draft" && editableEval.status !== "rejected" && editableEval.status !== "published" && editableEval.status !== "class_pending") {
       return;
     }
 
@@ -582,7 +582,10 @@ export default function Dashboard() {
     ];
 
     const upcomingActivities = activities
-      .filter(act => act.status === "upcoming")
+      .filter(act => {
+        const todayStr = new Date().toISOString().split('T')[0];
+        return act.status !== "completed" && act.date >= todayStr;
+      })
       .slice(0, 3);
 
     return (
@@ -695,23 +698,73 @@ export default function Dashboard() {
                         <div key={group.id} className="space-y-3">
                           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80 mt-2">{group.name}</p>
                           <div className="grid gap-3">
-                            {(group.subItems || []).map((item: any) => (
-                              <div key={item.id} className="grid gap-3 rounded-xl bg-muted/40 p-4 border border-border/30 sm:grid-cols-[1fr_120px] sm:items-center hover:bg-muted/60 transition-colors">
-                                <div>
-                                  <p className="text-sm font-semibold text-foreground/90">{item.name}</p>
-                                  <p className="text-xs text-muted-foreground mt-0.5">Điểm giới hạn/tối đa: <span className="font-medium text-foreground">{item.max_score}</span></p>
+                            {(group.subItems || []).map((item: any) => {
+                              const matchingDetail = (editableEval?.details || []).find((d: any) => d.sub_item_id === Number(item.id));
+                              const isRejected = matchingDetail?.is_rejected;
+                              const rejectReason = matchingDetail?.reject_reason;
+                              const currentScore = selfScores[String(item.id)] ?? 0;
+                              const isSelected = currentScore === item.max_score;
+                              
+                              return (
+                                <div 
+                                  key={item.id} 
+                                  onClick={() => {
+                                    if (editableEval.status !== 'draft' && editableEval.status !== 'rejected' && editableEval.status !== 'published' && editableEval.status !== 'class_pending') return;
+                                    const nextScore = isSelected ? 0 : item.max_score;
+                                    if (group.is_single_choice && nextScore > 0) {
+                                      const nextScores = { ...selfScores };
+                                      (group.subItems || []).forEach((other: any) => {
+                                        if (other.id !== item.id) {
+                                          nextScores[String(other.id)] = 0;
+                                          pendingChangesRef.current[String(other.id)] = 0;
+                                          dirtyFieldsRef.current.add(String(other.id));
+                                        }
+                                      });
+                                      nextScores[String(item.id)] = nextScore;
+                                      pendingChangesRef.current[String(item.id)] = nextScore;
+                                      dirtyFieldsRef.current.add(String(item.id));
+                                      setSelfScores(nextScores);
+                                    } else {
+                                      changeSelfScore(Number(item.id), nextScore);
+                                    }
+                                  }}
+                                  className={`grid gap-3 rounded-xl p-4 border sm:grid-cols-[1fr_120px] sm:items-center cursor-pointer transition-all ${
+                                    isRejected 
+                                      ? "bg-rose-500/5 border-rose-300 dark:border-rose-800 hover:bg-rose-500/10" 
+                                      : isSelected
+                                        ? "bg-emerald-500/10 border-emerald-500 dark:border-emerald-800 hover:bg-emerald-500/15 shadow-sm"
+                                        : "bg-muted/40 border-border/30 hover:bg-muted/60"
+                                  }`}
+                                >
+                                  <div>
+                                    <div className="text-sm font-semibold text-foreground/90 flex flex-wrap items-center gap-2">
+                                      {item.name}
+                                      {isRejected && (
+                                        <Badge className="bg-rose-500 text-white hover:bg-rose-600 border-0 text-[10px] py-0.5 px-1.5 rounded-md">Bị từ chối</Badge>
+                                      )}
+                                      {isSelected && !isRejected && (
+                                        <Badge className="bg-emerald-500 text-white hover:bg-emerald-600 border-0 text-[10px] py-0.5 px-1.5 rounded-md">Đã chọn</Badge>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground mt-0.5">Điểm giới hạn/tối đa: <span className="font-medium text-foreground">{item.max_score}</span></p>
+                                    {isRejected && rejectReason && (
+                                      <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 mt-1 bg-rose-50/50 dark:bg-rose-950/20 p-2 rounded-lg border border-rose-200/50">
+                                        Lý do: {rejectReason}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="flex justify-end sm:justify-center">
+                                    <div className={`h-9 px-4 rounded-xl flex items-center justify-center font-bold text-xs border transition-all ${
+                                      isSelected
+                                        ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
+                                        : "bg-background text-muted-foreground border-border"
+                                    }`}>
+                                      {currentScore} / {item.max_score} đ
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="relative">
-                                  <Input
-                                    type="number"
-                                    className="h-10 text-center font-bold bg-background pr-6 border-border/60 focus:border-amber-500"
-                                    value={selfScores[String(item.id)] ?? 0}
-                                    onChange={event => changeSelfScore(Number(item.id), Number(event.target.value))}
-                                  />
-                                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">đ</span>
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       ))}
@@ -919,11 +972,11 @@ export default function Dashboard() {
                       </p>
                       <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-1">
                         <MapPin className="h-3 w-3 text-muted-foreground/80 shrink-0" />
-                        <span className="truncate">{act.location}</span>
+                        <span className="truncate">{act.location || "ITC"}</span>
                       </div>
                     </div>
                     <div className="flex justify-between items-center mt-1 border-t pt-2 border-border/40">
-                      <span className="text-[10px] text-primary font-bold">+{act.score}đ rèn luyện</span>
+                      <span className="text-[10px] text-primary font-bold">+{act.points}đ rèn luyện</span>
                       <Button variant="ghost" size="sm" className="h-7 text-xs font-semibold px-2 hover:bg-primary/10 hover:text-primary gap-1">
                         Chi tiết <ChevronRight className="h-3 w-3" />
                       </Button>

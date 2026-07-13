@@ -132,7 +132,7 @@ def validate_evaluation_write_access(*, evaluation, user, client_version=None, r
             except Exception:
                 pass
 
-        if evaluation.status not in ('published', 'rejected'):
+        if evaluation.status not in ('published', 'rejected', 'class_pending'):
             log_audit(
                 user=user,
                 action='Workflow Locked',

@@ -107,11 +107,13 @@ const normalizeDisplayName = (value?: string) => {
 };
 
 const academicYearOptions = () => {
-  const base = new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1;
-  return Array.from({ length: 4 }, (_, index) => {
-    const start = base - 1 + index;
-    return `${start}-${start + 1}`;
-  });
+  const now = new Date();
+  const base = now.getMonth() + 1 >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  const years = [];
+  for (let y = 2023; y <= base; y++) {
+    years.push(`${y}-${y + 1}`);
+  }
+  return years;
 };
 
 const matchStatusClass = (status: MatchStatus) => {
@@ -183,7 +185,8 @@ export default function AcademicTranscriptImport() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [activeRecord, setActiveRecord] = useState<TranscriptRecord | null>(null);
   const [selectedClassId, setSelectedClassId] = useState("");
-  const [schoolYear, setSchoolYear] = useState(academicYearOptions()[1] || "");
+  const yearsList = academicYearOptions();
+  const [schoolYear, setSchoolYear] = useState(yearsList[yearsList.length - 1] || "");
   const [semester, setSemester] = useState("HK1");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [validating, setValidating] = useState(false);
@@ -946,7 +949,29 @@ export default function AcademicTranscriptImport() {
                   <Label className="text-xs text-muted-foreground uppercase font-semibold">Học kỳ</Label>
                   <Select value={semester} onValueChange={setSemester}>
                     <SelectTrigger className="bg-background"><SelectValue placeholder="Chọn học kỳ" /></SelectTrigger>
-                    <SelectContent>{SEMESTERS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+                    <SelectContent>
+                      {(() => {
+                        const now = new Date();
+                        const currentYear = now.getMonth() + 1 >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+                        const currentYearStr = `${currentYear}-${currentYear + 1}`;
+                        if (schoolYear !== currentYearStr) {
+                          return SEMESTERS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>);
+                        }
+                        const month = now.getMonth() + 1;
+                        if (month >= 8 && month <= 12) {
+                          return <SelectItem value="HK1">Học kỳ 1</SelectItem>;
+                        } else if (month >= 1 && month <= 3) {
+                          return (
+                            <>
+                              <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                              <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                            </>
+                          );
+                        } else {
+                          return SEMESTERS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>);
+                        }
+                      })()}
+                    </SelectContent>
                   </Select>
                 </div>
               </div>
@@ -1159,7 +1184,29 @@ export default function AcademicTranscriptImport() {
                     <Label className="text-xs text-muted-foreground uppercase font-semibold">Học kỳ</Label>
                     <Select value={semester} onValueChange={setSemester}>
                       <SelectTrigger className="bg-background"><SelectValue placeholder="Chọn học kỳ" /></SelectTrigger>
-                      <SelectContent>{SEMESTERS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+                      <SelectContent>
+                        {(() => {
+                          const now = new Date();
+                          const currentYear = now.getMonth() + 1 >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+                          const currentYearStr = `${currentYear}-${currentYear + 1}`;
+                          if (schoolYear !== currentYearStr) {
+                            return SEMESTERS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>);
+                          }
+                          const month = now.getMonth() + 1;
+                          if (month >= 8 && month <= 12) {
+                            return <SelectItem value="HK1">Học kỳ 1</SelectItem>;
+                          } else if (month >= 1 && month <= 3) {
+                            return (
+                              <>
+                                <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                                <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                              </>
+                            );
+                          } else {
+                            return SEMESTERS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>);
+                          }
+                        })()}
+                      </SelectContent>
                     </Select>
                   </div>
                 </div>

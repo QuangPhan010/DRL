@@ -20,9 +20,40 @@ from .serializers import (
     NotificationSerializer, RoomSerializer
 )
 
-def create_notification(user, title, message):
+def create_notification(user, title, message, type='system', level='info', action_url=None):
     try:
-        Notification.objects.create(user=user, title=title, message=message)
+        notification = Notification.objects.create(
+            user=user,
+            title=title,
+            message=message,
+            type=type,
+            level=level,
+            action_url=action_url
+        )
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    f"user_{user.id}",
+                    {
+                        "type": "send_notification",
+                        "notification": {
+                            "id": notification.id,
+                            "user": user.id,
+                            "title": notification.title,
+                            "message": notification.message,
+                            "unread": notification.unread,
+                            "type": notification.type,
+                            "level": notification.level,
+                            "action_url": notification.action_url,
+                            "created_at": notification.created_at.isoformat() if notification.created_at else None
+                        }
+                    }
+                )
+        except Exception as ws_err:
+            print(f"Error broadcasting websocket notification: {ws_err}")
     except Exception as e:
         print(f"Error creating notification: {e}")
 
@@ -385,8 +416,8 @@ def request_first_login_password(request):
     if not user:
         return Response({'error': 'Tài khoản sinh viên chưa được liên kết.'}, status=status.HTTP_400_BAD_REQUEST)
         
-    if not user.is_first_login:
-        return Response({'error': 'Tài khoản này đã đăng nhập và đổi mật khẩu trước đó.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not user.is_first_login or user.last_login is not None:
+        return Response({'error': 'Tài khoản đã đổi mật khẩu lần đầu.'}, status=status.HTTP_400_BAD_REQUEST)
         
     import random
     import string
@@ -1372,7 +1403,13 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         )
         
         if user.is_authenticated:
-            if user.role == 'student':
+            if 'class_monitor' in user.roles:
+                student = getattr(user, 'student_profile', None)
+                if student and student.class_info:
+                    queryset = queryset.filter(student__class_info=student.class_info)
+                else:
+                    queryset = queryset.filter(student__user=user)
+            elif user.role == 'student':
                 queryset = queryset.filter(student__user=user).exclude(status='draft')
             elif user.role == 'advisor':
                 queryset = queryset.filter(student__class_info__advisor=user)
@@ -1708,13 +1745,19 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                     create_notification(
                         user=monitor,
                         title="Phiếu tự đánh giá mới cần duyệt",
-                        message=f"Sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) lớp {evaluation.student.class_info.name} đã nộp phiếu tự đánh giá HK{evaluation.semester} {evaluation.year}."
+                        message=f"Sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) lớp {evaluation.student.class_info.name} đã nộp phiếu tự đánh giá HK{evaluation.semester} {evaluation.year}.",
+                        type='evaluation',
+                        level='warning',
+                        action_url='/class-review'
                     )
                 if evaluation.student.class_info.advisor:
                     create_notification(
                         user=evaluation.student.class_info.advisor,
                         title="Phiếu tự đánh giá mới cần duyệt",
-                        message=f"Sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) lớp {evaluation.student.class_info.name} đã nộp phiếu tự đánh giá HK{evaluation.semester} {evaluation.year}."
+                        message=f"Sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) lớp {evaluation.student.class_info.name} đã nộp phiếu tự đánh giá HK{evaluation.semester} {evaluation.year}.",
+                        type='evaluation',
+                        level='warning',
+                        action_url='/approvals'
                     )
 
         rebalance_training_score(evaluation.student)
@@ -1808,13 +1851,19 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             create_notification(
                 user=student_user,
                 title="Phiếu rèn luyện được duyệt ở cấp lớp",
-                message=f"Phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn đã được ban cán sự lớp thông qua và chuyển lên Cố vấn học tập."
+                message=f"Phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn đã được ban cán sự lớp thông qua và chuyển lên Cố vấn học tập.",
+                type='evaluation',
+                level='success',
+                action_url='/'
             )
         if evaluation.student.class_info and evaluation.student.class_info.advisor:
             create_notification(
                 user=evaluation.student.class_info.advisor,
                 title="Phiếu rèn luyện mới chờ phê duyệt",
-                message=f"Phiếu rèn luyện của sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) đã được lớp thông qua và chờ bạn phê duyệt."
+                message=f"Phiếu rèn luyện của sinh viên {evaluation.student.full_name} ({evaluation.student.student_id}) đã được lớp thông qua và chờ bạn phê duyệt.",
+                type='evaluation',
+                level='warning',
+                action_url='/approvals'
             )
 
         serializer_data = EvaluationSerializer(evaluation).data
@@ -1875,14 +1924,74 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                 create_notification(
                     user=student_user,
                     title="Phiếu rèn luyện đã được duyệt hoàn tất",
-                    message=f"Cố vấn học tập đã duyệt hoàn tất phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn với tổng số điểm là {evaluation.total_score}."
+                    message=f"Cố vấn học tập đã duyệt hoàn tất phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn với tổng số điểm là {evaluation.total_score}.",
+                    type='evaluation',
+                    level='success',
+                    action_url='/'
                 )
             elif status_param == 'rejected':
                 create_notification(
                     user=student_user,
                     title="Phiếu rèn luyện bị trả lại",
-                    message=f"Phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn đã bị từ chối/yêu cầu bổ sung bởi Cố vấn học tập. Lý do: {review_note}"
+                    message=f"Phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn đã bị từ chối/yêu cầu bổ sung bởi Cố vấn học tập. Lý do: {review_note}",
+                    type='evaluation',
+                    level='danger',
+                    action_url='/'
                 )
+
+        serializer_data = EvaluationSerializer(evaluation).data
+        serializer_data['serverVersion'] = evaluation.version
+        return Response(serializer_data)
+
+    @action(detail=True, methods=['post'], url_path='reject-details')
+    def reject_details(self, request, pk=None):
+        evaluation = self.get_object()
+        rejected_items = request.data.get('rejected_items', [])  # list of {sub_item_id: int, reason: str}
+        review_note = request.data.get('reviewNote', '')
+
+        from .services.workflow_guard import validate_evaluation_write_access, log_audit
+
+        try:
+            validate_evaluation_write_access(
+                evaluation=evaluation,
+                user=request.user,
+                client_version=request.data.get('clientVersion'),
+                request=request
+            )
+        except Exception as e:
+            roles = set(request.user.roles if hasattr(request.user, 'roles') else [request.user.role])
+            is_reviewer = bool(roles.intersection({'class_monitor', 'advisor', 'student_affairs', 'admin'}))
+            if not is_reviewer:
+                return self._error_res('UNAUTHORIZED', str(e), {}, status.HTTP_403_FORBIDDEN)
+
+        with transaction.atomic():
+            # Reset any old rejection status for this evaluation's details
+            evaluation.details.all().update(is_rejected=False, reject_reason=None)
+
+            # Apply new rejections
+            for item in rejected_items:
+                sub_id = item.get('sub_item_id')
+                reason = item.get('reason', '')
+                evaluation.details.filter(sub_item_id=sub_id).update(is_rejected=True, reject_reason=reason)
+
+            evaluation.status = 'rejected'
+            evaluation.review_note = review_note or 'Có tiêu chí bị ban cán sự / cố vấn từ chối.'
+            evaluation.version += 1
+            evaluation.save()
+
+        log_audit(user=request.user, action='Rejected Details', entity_id=evaluation.id, before_value='', after_value=f"status=rejected_version={evaluation.version}", request=request)
+
+        # Send notification to student
+        student_user = User.objects.filter(student_id=evaluation.student.student_id).first()
+        if student_user:
+            create_notification(
+                user=student_user,
+                title="Phiếu rèn luyện có tiêu chí bị từ chối",
+                message=f"Phiếu rèn luyện HK{evaluation.semester} {evaluation.year} của bạn bị từ chối/yêu cầu điều chỉnh một số tiêu chí. Vui lòng kiểm tra lại.",
+                type='evaluation',
+                level='danger',
+                action_url='/'
+            )
 
         serializer_data = EvaluationSerializer(evaluation).data
         serializer_data['serverVersion'] = evaluation.version
@@ -1909,6 +2018,98 @@ class ActivityViewSet(viewsets.ModelViewSet):
             is_external_bool = is_external_param.lower() == 'true'
             queryset = queryset.filter(is_external=is_external_bool)
         return queryset
+
+    def perform_update(self, serializer):
+        old_instance = self.get_object()
+        old_date = old_instance.date
+        old_start_time = old_instance.start_time
+        
+        instance = serializer.save()
+        
+        if old_date != instance.date or old_start_time != instance.start_time:
+            from django.core.mail import send_mail
+            from django.conf import settings
+            from django.utils import timezone
+            from drl_app.models import ActivityParticipant, User
+            
+            participants = ActivityParticipant.objects.filter(activity=instance, status='registered')
+            
+            for p in participants:
+                student = p.student
+                student_user = User.objects.filter(student_id=student.student_id).first()
+                
+                if student_user:
+                    try:
+                        create_notification(
+                            user=student_user,
+                            title="Thay đổi lịch hoạt động",
+                            message=f"Hoạt động '{instance.title}' đã thay đổi thời gian diễn ra.",
+                            type='activity',
+                            level='warning',
+                            action_url=f"/activities/{instance.id}"
+                        )
+                    except Exception as notif_err:
+                        print(f"Error creating reschedule notification: {notif_err}")
+                
+                if student.email:
+                    try:
+                        old_time_str = f"{old_start_time.strftime('%H:%M') if old_start_time else '00:00'} ngày {old_date.strftime('%d/%m/%Y') if old_date else 'chưa xác định'}"
+                        new_time_str = f"{instance.start_time.strftime('%H:%M') if instance.start_time else '00:00'} ngày {instance.date.strftime('%d/%m/%Y') if instance.date else 'chưa xác định'}"
+                        
+                        email_subject = f"[ITC Point] Thay đổi lịch hoạt động: {instance.title}"
+                        email_message = f"Chào {student.full_name},\n\nBan tổ chức xin thông báo hoạt động '{instance.title}' đã thay đổi thời gian diễn ra từ {old_time_str} sang {new_time_str}.\n\nVui lòng xem thông tin chi tiết trên hệ thống."
+                        
+                        email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #ef4444, #dc2626); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Thay Đổi Lịch Hoạt Động</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Cập nhật lịch tổ chức hoạt động</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">Chào {student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px; margin-top: 12px;">Ban tổ chức xin thông báo về việc thay đổi thời gian diễn ra của hoạt động bạn đã đăng ký như sau:</p>
+    
+    <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #f1f5f9; border-left: 4px solid #ef4444;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 130px; text-transform: uppercase; letter-spacing: 0.5px;">Hoạt động:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">{instance.title}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Lịch cũ:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #ef4444; font-weight: 500; text-decoration: line-through;">{old_time_str}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Lịch mới:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #10b981; font-weight: 700;">{new_time_str}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Lý do dời:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500; line-height: 1.4;">Thời gian tổ chức được điều chỉnh để chuẩn bị tốt hơn.</td>
+        </tr>
+      </table>
+    </div>
+
+    <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin: 0;">
+      * Mọi quyền lợi đăng ký và điểm danh của hoạt động này sẽ được giữ nguyên theo lịch thi đấu/học tập mới.
+    </p>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px; line-height: 1.5;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                        send_mail(
+                            email_subject,
+                            email_message,
+                            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                            [student.email],
+                            fail_silently=False,
+                            html_message=email_html
+                        )
+                    except Exception as email_err:
+                        print(f"Error sending reschedule email to {student.student_id}: {email_err}")
 
     @action(
         detail=True,
@@ -2079,6 +2280,80 @@ class ActivityViewSet(viewsets.ModelViewSet):
                 {'error': 'Hoạt động đã đủ số lượng người tham gia tối đa.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if created:
+            create_notification(
+                user=request.user,
+                title="Đăng ký hoạt động thành công",
+                message=f"Bạn đã đăng ký tham gia hoạt động '{activity.title}' thành công.",
+                type='activity',
+                level='success',
+                action_url='/'
+            )
+            if student.email:
+                try:
+                    from django.core.mail import send_mail
+                    from django.conf import settings
+                    
+                    time_str = f"{activity.start_time.strftime('%H:%M') if activity.start_time else '00:00'} ngày {activity.date.strftime('%d/%m/%Y') if activity.date else 'chưa xác định'}"
+                    location_str = activity.location or "Hội trường/Online"
+                    points_str = str(activity.points)
+                    
+                    email_subject = f"[ITC Point] Đăng ký hoạt động thành công: {activity.title}"
+                    email_message = f"Chào {student.full_name},\n\nHệ thống xác nhận bạn đã đăng ký tham gia hoạt động '{activity.title}' thành công.\n\nThời gian: {time_str}\nĐịa điểm: {location_str}\nĐiểm rèn luyện: +{points_str}đ."
+                    
+                    email_html = f"""
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 32px 24px; text-align: center; color: white;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Đăng Ký Hoạt Động</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Ghi nhận đăng ký tham gia thành công</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">Chào {student.full_name},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px; margin-top: 12px;">Hệ thống xác nhận bạn đã đăng ký tham gia hoạt động dưới đây thành công:</p>
+    
+    <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #f1f5f9; border-left: 4px solid #10b981;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 130px; text-transform: uppercase; letter-spacing: 0.5px;">Hoạt động:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">{activity.title}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Thời gian:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500;">{time_str}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Địa điểm:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500;">{location_str}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Điểm cộng:</td>
+          <td style="padding: 8px 0; font-size: 16px; color: #10b981; font-weight: 700;">+{points_str}đ rèn luyện</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="background-color: #eff6ff; border-radius: 8px; padding: 14px 18px; border: 1px solid #dbeafe; margin-top: 24px;">
+      <p style="color: #1e40af; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+        * Nhắc nhở: Hãy có mặt đúng giờ và thực hiện điểm danh Check-in khi bắt đầu, Check-out khi kết thúc hoạt động nhằm tích lũy điểm rèn luyện.
+      </p>
+    </div>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px; line-height: 1.5;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+"""
+                    send_mail(
+                        email_subject,
+                        email_message,
+                        getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@itcpoint.com'),
+                        [student.email],
+                        fail_silently=False,
+                        html_message=email_html
+                    )
+                except Exception as email_err:
+                    print(f"Error sending registration confirmation email to {student.student_id}: {email_err}")
         return Response(ActivitySerializer(activity).data)
 
     @action(detail=True, methods=['post'], url_path='submit-evidence')
@@ -2243,6 +2518,14 @@ class ActivityViewSet(viewsets.ModelViewSet):
                 severity="High",
                 description=f"Nhiều tài khoản check-in chung một thiết bị ({device_id}) trong thời gian ngắn: {other_students}"
             )
+            create_notification(
+                user=request.user,
+                title="Cảnh báo nghi ngờ gian lận điểm danh",
+                message=f"Hệ thống phát hiện thiết bị của bạn ({device_id}) được dùng để điểm danh cho nhiều tài khoản khác nhau trong thời gian ngắn.",
+                type='warning',
+                level='danger',
+                action_url='/'
+            )
 
         # Save check-in
         checkin_obj = ActivityCheckIn.objects.create(
@@ -2256,6 +2539,16 @@ class ActivityViewSet(viewsets.ModelViewSet):
             face_realness=face_verification['realness'],
             device_id=device_id,
             ip_address=ip_addr
+        )
+
+        # Send notification to student
+        create_notification(
+            user=request.user,
+            title="Điểm danh vào sự kiện thành công",
+            message=f"Bạn đã điểm danh thành công vào hoạt động '{activity.title}' bằng Face ID.",
+            type='activity',
+            level='success',
+            action_url='/'
         )
 
         # Initialize/update Attendance record
@@ -2357,6 +2650,14 @@ class ActivityViewSet(viewsets.ModelViewSet):
             if participant.status != 'attended':
                 participant.status = 'attended'
                 participant.save()
+            create_notification(
+                user=request.user,
+                title="Điểm danh ra sự kiện thành công",
+                message=f"Bạn đã điểm danh ra và hoàn thành hoạt động '{activity.title}' với thời gian tham gia {duration_mins} phút.",
+                type='activity',
+                level='success',
+                action_url='/'
+            )
 
         return Response({
             'message': 'Check-out thành công',
@@ -2757,6 +3058,37 @@ class ExternalActivityViewSet(viewsets.ModelViewSet):
             comment=comment
         )
 
+        # Send notifications
+        student_user = User.objects.filter(student_id=activity.student.student_id).first()
+        if student_user:
+            if status_input == 'advisor_approved':
+                create_notification(
+                    user=student_user,
+                    title="Hoạt động ngoại khóa được Cố vấn thông qua",
+                    message=f"Hoạt động '{activity.activity_name}' của bạn đã được Cố vấn học tập thông qua và chuyển lên phòng CTSV duyệt.",
+                    type='activity',
+                    level='success',
+                    action_url='/'
+                )
+            elif status_input == 'need_more_info':
+                create_notification(
+                    user=student_user,
+                    title="Yêu cầu bổ sung minh chứng hoạt động",
+                    message=f"Cố vấn học tập yêu cầu bạn bổ sung thêm minh chứng cho hoạt động '{activity.activity_name}'. Nhận xét: {comment}",
+                    type='activity',
+                    level='warning',
+                    action_url='/'
+                )
+            elif status_input == 'rejected_by_advisor':
+                create_notification(
+                    user=student_user,
+                    title="Minh chứng hoạt động bị Cố vấn từ chối",
+                    message=f"Minh chứng hoạt động '{activity.activity_name}' đã bị Cố vấn học tập từ chối. Lý do: {comment}",
+                    type='activity',
+                    level='danger',
+                    action_url='/'
+                )
+
         # Audit logging
         AuditLog.objects.create(
             user=reviewer,
@@ -2793,6 +3125,28 @@ class ExternalActivityViewSet(viewsets.ModelViewSet):
             status=status_input,
             comment=comment
         )
+
+        # Send notifications
+        student_user = User.objects.filter(student_id=activity.student.student_id).first()
+        if student_user:
+            if status_input == 'approved':
+                create_notification(
+                    user=student_user,
+                    title="Minh chứng hoạt động ngoại khóa được CTSV duyệt",
+                    message=f"Minh chứng hoạt động ngoại khóa '{activity.activity_name}' đã được phòng CTSV duyệt thành công. Bạn được cộng {activity.proposed_score} điểm rèn luyện.",
+                    type='activity',
+                    level='success',
+                    action_url='/'
+                )
+            elif status_input == 'rejected':
+                create_notification(
+                    user=student_user,
+                    title="Minh chứng hoạt động ngoại khóa bị CTSV từ chối",
+                    message=f"Minh chứng hoạt động ngoại khóa '{activity.activity_name}' đã bị phòng CTSV từ chối. Lý do: {comment}",
+                    type='activity',
+                    level='danger',
+                    action_url='/'
+                )
 
         # Audit logging
         AuditLog.objects.create(

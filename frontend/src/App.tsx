@@ -30,7 +30,44 @@ const EmailPreview = lazy(() => import("./pages/EmailPreview"));
 const Rooms = lazy(() => import("./pages/Rooms"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
+import { useAuth } from "@/contexts/AuthContext";
+import { useLocation } from "react-router-dom";
+import { navItems, managementItems } from "@/components/layout/AppSidebar";
+
 const queryClient = new QueryClient();
+
+function RoleProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const location = useLocation();
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const path = location.pathname;
+  const allItems = [...navItems, ...managementItems];
+  
+  let matchedItem = allItems.find(item => item.url === path);
+  if (!matchedItem) {
+    matchedItem = allItems.find(item => item.url !== "/" && path.startsWith(item.url));
+  }
+
+  if (matchedItem) {
+    const rolesAllowed = matchedItem.roles;
+    const userRole = user.role;
+    if (!rolesAllowed.includes(userRole as any)) {
+      return (
+        <ErrorPage 
+          code="403" 
+          title="Không có quyền truy cập" 
+          message={`Tài khoản với vai trò '${user.role}' không được phép truy cập chức năng này.`} 
+        />
+      );
+    }
+  }
+
+  return <>{children}</>;
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -45,25 +82,25 @@ const App = () => (
               <Route path="/loading" element={<Loading />} />
               <Route path="/error" element={<ErrorPage />} />
               <Route element={<AppLayout />}>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/students" element={<Classes />} />
-                <Route path="/classes" element={<Classes />} />
-                <Route path="/approvals" element={<Approvals />} />
+                <Route path="/" element={<RoleProtectedRoute><Dashboard /></RoleProtectedRoute>} />
+                <Route path="/students" element={<RoleProtectedRoute><Classes /></RoleProtectedRoute>} />
+                <Route path="/classes" element={<RoleProtectedRoute><Classes /></RoleProtectedRoute>} />
+                <Route path="/approvals" element={<RoleProtectedRoute><Approvals /></RoleProtectedRoute>} />
                 <Route path="/my-scores" element={<Navigate to="/" replace />} />
-                <Route path="/criteria" element={<Criteria />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/activities" element={<Activities />} />
-                <Route path="/activities/create" element={<ActivityForm />} />
-                <Route path="/activities/:id" element={<ActivityDetail />} />
-                <Route path="/activities/:id/edit" element={<ActivityForm />} />
-                <Route path="/class-review" element={<ClassReview />} />
-                <Route path="/academic-transcript-import" element={<AcademicTranscriptImport />} />
-                <Route path="/evaluation-sessions/create" element={<EvaluationSession />} />
-                <Route path="/organizations" element={<Organizations />} />
-                <Route path="/rooms" element={<Rooms />} />
-                <Route path="/profile" element={<Profile />} />
-                <Route path="/reports" element={<Reports />} />
-                <Route path="/email-preview" element={<EmailPreview />} />
+                <Route path="/criteria" element={<RoleProtectedRoute><Criteria /></RoleProtectedRoute>} />
+                <Route path="/settings" element={<RoleProtectedRoute><SettingsPage /></RoleProtectedRoute>} />
+                <Route path="/activities" element={<RoleProtectedRoute><Activities /></RoleProtectedRoute>} />
+                <Route path="/activities/create" element={<RoleProtectedRoute><ActivityForm /></RoleProtectedRoute>} />
+                <Route path="/activities/:id" element={<RoleProtectedRoute><ActivityDetail /></RoleProtectedRoute>} />
+                <Route path="/activities/:id/edit" element={<RoleProtectedRoute><ActivityForm /></RoleProtectedRoute>} />
+                <Route path="/class-review" element={<RoleProtectedRoute><ClassReview /></RoleProtectedRoute>} />
+                <Route path="/academic-transcript-import" element={<RoleProtectedRoute><AcademicTranscriptImport /></RoleProtectedRoute>} />
+                <Route path="/evaluation-sessions/create" element={<RoleProtectedRoute><EvaluationSession /></RoleProtectedRoute>} />
+                <Route path="/organizations" element={<RoleProtectedRoute><Organizations /></RoleProtectedRoute>} />
+                <Route path="/rooms" element={<RoleProtectedRoute><Rooms /></RoleProtectedRoute>} />
+                <Route path="/profile" element={<RoleProtectedRoute><Profile /></RoleProtectedRoute>} />
+                <Route path="/reports" element={<RoleProtectedRoute><Reports /></RoleProtectedRoute>} />
+                <Route path="/email-preview" element={<RoleProtectedRoute><EmailPreview /></RoleProtectedRoute>} />
               </Route>
 
               <Route path="*" element={<NotFound />} />

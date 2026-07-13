@@ -13,9 +13,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Role } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
-interface NavItem { title: string; url: string; icon: any; roles: Role[]; }
+export interface NavItem { title: string; url: string; icon: any; roles: Role[]; }
 
-const navItems: NavItem[] = [
+export const navItems: NavItem[] = [
   // 1. Tổng quan & Cá nhân
   { title: "Tổng quan", url: "/", icon: LayoutDashboard, roles: ["admin", "advisor", "student", "organizer", "class_monitor", "student_affairs", "academic_affairs"] },
 
@@ -28,19 +28,19 @@ const navItems: NavItem[] = [
   { title: "Xét duyệt", url: "/approvals", icon: FileCheck, roles: ["advisor", "student_affairs", "admin"] },
 
   // 4. Quản lý hoạt động
-  { title: "Quản lý hoạt động", url: "/activities", icon: CalendarDays, roles: ["student", "organizer", "class_monitor", "advisor", "student_affairs", "admin"] },
+  { title: "Quản lý hoạt động", url: "/activities", icon: CalendarDays, roles: ["student", "organizer", "class_monitor", "advisor", "student_affairs", "admin", "academic_affairs"] },
 
   // 5. Nhập & Đồng bộ điểm học tập (Dữ liệu học lực)
   { title: "Nhập dữ liệu", url: "/academic-transcript-import", icon: FileUp, roles: ["academic_affairs", "admin"] },
 
   // 6. Báo cáo & cấu hình
-  { title: "Báo cáo", url: "/reports", icon: FileText, roles: ["admin", "advisor", "student_affairs", "academic_affairs", "class_monitor"] },
+  { title: "Báo cáo", url: "/reports", icon: FileText, roles: ["admin", "advisor", "student_affairs", "academic_affairs", ] },
   { title: "Cấu hình hệ thống", url: "/settings", icon: Settings, roles: ["admin"] },
 ];
 
-const managementItems: NavItem[] = [
-  { title: "Quản lý đơn vị", url: "/organizations", icon: Building2, roles: ["admin", "student_affairs", "organizer"] },
-  { title: "Quản lý phòng", url: "/rooms", icon: Home, roles: ["admin", "student_affairs", "organizer", "advisor"] },
+export const managementItems: NavItem[] = [
+  { title: "Quản lý đơn vị", url: "/organizations", icon: Building2, roles: ["admin", "organizer"] },
+  { title: "Quản lý phòng", url: "/rooms", icon: Home, roles: ["admin", "organizer"] },
   { title: "Quản lý lớp & SV", url: "/classes", icon: GraduationCap, roles: ["admin", "advisor", "student_affairs", "academic_affairs"] },
 ];
 

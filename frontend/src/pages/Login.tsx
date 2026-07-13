@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { User } from "@/lib/mock-data";
 import { requestLocationAtLogin } from "@/lib/geolocation";

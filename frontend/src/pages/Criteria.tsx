@@ -44,10 +44,10 @@ const mutationHeaders = () => {
 
 const getAcademicYears = () => {
   const now = new Date();
-  const currentYear = now.getFullYear();
+  const base = now.getMonth() + 1 >= 8 ? now.getFullYear() : now.getFullYear() - 1;
   const years = [];
-  for (let i = -3; i <= 3; i++) {
-    years.push(`${currentYear + i}-${currentYear + i + 1}`);
+  for (let y = 2023; y <= base; y++) {
+    years.push(`${y}-${y + 1}`);
   }
   return years;
 };
@@ -1114,9 +1114,39 @@ export default function Criteria() {
                 <Select value={setSemester} onValueChange={setSetSemester}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="HK1">Học kỳ 1</SelectItem>
-                    <SelectItem value="HK2">Học kỳ 2</SelectItem>
-                    <SelectItem value="HK3">Học kỳ 3</SelectItem>
+                    {(() => {
+                      const now = new Date();
+                      const currentYear = now.getMonth() + 1 >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+                      const currentYearStr = `${currentYear}-${currentYear + 1}`;
+                      if (setAcademicYear !== currentYearStr) {
+                        return (
+                          <>
+                            <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                            <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                            <SelectItem value="HK3">Học kỳ 3</SelectItem>
+                          </>
+                        );
+                      }
+                      const month = now.getMonth() + 1;
+                      if (month >= 8 && month <= 12) {
+                        return <SelectItem value="HK1">Học kỳ 1</SelectItem>;
+                      } else if (month >= 1 && month <= 3) {
+                        return (
+                          <>
+                            <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                            <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                          </>
+                        );
+                      } else {
+                        return (
+                          <>
+                            <SelectItem value="HK1">Học kỳ 1</SelectItem>
+                            <SelectItem value="HK2">Học kỳ 2</SelectItem>
+                            <SelectItem value="HK3">Học kỳ 3</SelectItem>
+                          </>
+                        );
+                      }
+                    })()}
                   </SelectContent>
                 </Select>
               </div>

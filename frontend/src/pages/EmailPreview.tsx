@@ -37,6 +37,23 @@ export default function EmailPreview() {
   const [resNewTime, setResNewTime] = useState("14:30 ngày 19/07/2026");
   const [rescheduleReason, setRescheduleReason] = useState("Sân bóng đang tiến hành bảo dưỡng mặt cỏ định kỳ.");
 
+  // Tab 5: Assessment fields
+  const [assessSemester, setAssessSemester] = useState(() => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    if (month >= 8 && month <= 12) return "Học kỳ 1";
+    if (month >= 1 && month <= 3) return "Học kỳ 2";
+    return "Học kỳ 3";
+  });
+  const [assessYear, setAssessYear] = useState(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    return month >= 8 ? `${year} - ${year + 1}` : `${year - 1} - ${year}`;
+  });
+  const [assessStartDate, setAssessStartDate] = useState("13/07/2026");
+  const [assessDeadline, setAssessDeadline] = useState("20/07/2026");
+
   // Template 1: Password Email
   const passwordEmailHtml = `
 <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); background-color: #ffffff;">
@@ -205,14 +222,60 @@ export default function EmailPreview() {
         </tr>
         <tr>
           <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Lý do dời:</td>
-          <td style="padding: 8px 0; font-size: 14px; color: #475569; line-height: 1.5;">${rescheduleReason}</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500; line-height: 1.4;">${rescheduleReason}</td>
         </tr>
       </table>
     </div>
 
+    <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin: 0;">
+      * Mọi quyền lợi đăng ký và điểm danh của hoạt động này sẽ được giữ nguyên theo lịch thi đấu/học tập mới.
+    </p>
+  </div>
+  <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #f1f5f9; color: #94a3b8; font-size: 12px; line-height: 1.5;">
+    <p style="margin: 0 0 6px 0; font-weight: 500;">Email này được hệ thống ITC Point gửi tự động.</p>
+    <p style="margin: 0;">© 2026 ITC Point. All rights reserved.</p>
+  </div>
+</div>
+  `;
+
+  // Template 5: Assessment Notification Email
+  const assessmentEmailHtml = `
+<div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); background-color: #ffffff;">
+  <div style="background: linear-gradient(135deg, #6366f1, #a855f7); padding: 32px 24px; text-align: center; color: white;">
+    <div style="height: 60px; width: 60px; border-radius: 50%; background: white; padding: 4px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+      <img src="http://localhost:8080/logo.jpg" alt="ITC Logo" style="height: 48px; width: 48px; border-radius: 50%; object-fit: contain;" onerror="this.src='https://ui-avatars.com/api/?name=ITC&background=6366f1&color=fff'" />
+    </div>
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">Thông Báo Đánh Giá ĐRL</h1>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500;">Bắt đầu đợt tự đánh giá điểm rèn luyện</p>
+  </div>
+  <div style="padding: 40px 32px; background-color: #ffffff;">
+    <h2 style="margin-top: 0; color: #1e293b; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">Chào ${studentName},</h2>
+    <p style="color: #475569; line-height: 1.6; font-size: 15px; margin-top: 12px;">Hệ thống thông báo: Cổng tự đánh giá điểm rèn luyện trực tuyến đã chính thức được mở. Vui lòng truy cập hệ thống để hoàn thành phiếu tự chấm điểm rèn luyện cá nhân:</p>
+    
+    <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin: 28px 0; border: 1px solid #f1f5f9; border-left: 4px solid #6366f1;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 150px; text-transform: uppercase; letter-spacing: 0.5px;">Học kỳ / Năm học:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">${assessSemester} - Năm học ${assessYear}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Ngày mở cổng:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 500;">${assessStartDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Hạn cuối tự chấm:</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #ef4444; font-weight: 700;">${assessDeadline}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 36px 0 28px 0;">
+      <a href="http://localhost:8080/" style="background: linear-gradient(135deg, #6366f1, #a855f7); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3); letter-spacing: -0.2px;">Thực hiện tự đánh giá</a>
+    </div>
+
     <div style="background-color: #fef2f2; border-radius: 8px; padding: 14px 18px; border: 1px solid #fee2e2; margin-top: 24px;">
       <p style="color: #b91c1c; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
-        * Lưu ý: Ban tổ chức xin lỗi vì sự bất tiện này. Mong bạn sắp xếp thời gian để tham gia hoạt động đầy đủ theo lịch trình mới.
+        * Lưu ý: Sau thời hạn nêu trên, hệ thống sẽ tự động đóng. Những sinh viên không tự chấm điểm sẽ nhận điểm 0 rèn luyện cho học kỳ này.
       </p>
     </div>
   </div>
@@ -234,6 +297,8 @@ export default function EmailPreview() {
         return checkEmailHtml;
       case "reschedule":
         return rescheduleEmailHtml;
+      case "assessment":
+        return assessmentEmailHtml;
       default:
         return passwordEmailHtml;
     }
@@ -277,6 +342,10 @@ export default function EmailPreview() {
               <TabsTrigger value="reschedule" className="flex items-center gap-1.5 data-[state=active]:bg-rose-500/10 data-[state=active]:text-rose-600 rounded-lg px-4 py-2">
                 <RefreshCw className="h-4 w-4" />
                 Dời hoạt động
+              </TabsTrigger>
+              <TabsTrigger value="assessment" className="flex items-center gap-1.5 data-[state=active]:bg-indigo-500/10 data-[state=active]:text-indigo-600 rounded-lg px-4 py-2">
+                <Mail className="h-4 w-4" />
+                Thông báo ĐRL
               </TabsTrigger>
             </TabsList>
             <span className="text-xs text-muted-foreground bg-background px-3 py-1.5 border rounded-full shadow-inner font-mono">
@@ -437,6 +506,45 @@ export default function EmailPreview() {
                         value={rescheduleReason}
                         onChange={(e) => setRescheduleReason(e.target.value)}
                         placeholder="Nhập lý do dời..."
+                      />
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="assessment" className="m-0 space-y-4">
+                    <div className="space-y-2 border-t pt-4 mt-2">
+                      <Label htmlFor="assess-semester">Học kỳ</Label>
+                      <Input
+                        id="assess-semester"
+                        value={assessSemester}
+                        onChange={(e) => setAssessSemester(e.target.value)}
+                        placeholder="Ví dụ: Học kỳ 1..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="assess-year">Năm học</Label>
+                      <Input
+                        id="assess-year"
+                        value={assessYear}
+                        onChange={(e) => setAssessYear(e.target.value)}
+                        placeholder="Ví dụ: 2026 - 2027..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="assess-start">Ngày mở cổng</Label>
+                      <Input
+                        id="assess-start"
+                        value={assessStartDate}
+                        onChange={(e) => setAssessStartDate(e.target.value)}
+                        placeholder="Nhập ngày..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="assess-deadline">Hạn cuối tự chấm</Label>
+                      <Input
+                        id="assess-deadline"
+                        value={assessDeadline}
+                        onChange={(e) => setAssessDeadline(e.target.value)}
+                        placeholder="Nhập ngày..."
                       />
                     </div>
                   </TabsContent>

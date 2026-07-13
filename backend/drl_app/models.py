@@ -309,6 +309,8 @@ class EvaluationDetail(models.Model):
     evaluation = models.ForeignKey(Evaluation, on_delete=models.CASCADE, related_name='details')
     sub_item = models.ForeignKey(SubItem, on_delete=models.CASCADE)
     score = models.IntegerField(default=0)
+    is_rejected = models.BooleanField(default=False)
+    reject_reason = models.TextField(blank=True, null=True)
 
     class Meta:
         db_table = 'evaluation_detail'
@@ -627,6 +629,9 @@ class Notification(models.Model):
     title = models.CharField(max_length=255)
     message = models.TextField()
     unread = models.BooleanField(default=True)
+    type = models.CharField(max_length=50, default='system')
+    level = models.CharField(max_length=50, default='info')
+    action_url = models.CharField(max_length=512, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ClipboardCheck, Users, Eye, CheckCircle2, AlertTriangle, Send } from "lucide-react";
+import { ClipboardCheck, Users, Eye, CheckCircle2, AlertTriangle, Send, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { classificationColor } from "@/lib/mock-data";
 import { toast } from "sonner";
@@ -23,6 +24,25 @@ export default function ClassReview() {
   const [selectedEval, setSelectedEval] = useState<any | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [rejectedItems, setRejectedItems] = useState<Record<number, string>>({});
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [tempReason, setTempReason] = useState("");
+
+  useEffect(() => {
+    if (selectedEval) {
+      const initialRejects: Record<number, string> = {};
+      (selectedEval.details || []).forEach((det: any) => {
+        if (det.is_rejected) {
+          initialRejects[det.sub_item_id] = det.reject_reason || "Không phù hợp";
+        }
+      });
+      setRejectedItems(initialRejects);
+    } else {
+      setRejectedItems({});
+    }
+    setRejectingId(null);
+    setTempReason("");
+  }, [selectedEval]);
 
   const fetchClassAndEvals = async () => {
     try {
@@ -96,6 +116,72 @@ export default function ClassReview() {
         setReviewNote("");
       } else {
         toast.error("Không thể xác nhận kết quả");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối");
+    }
+  };
+
+  const handleRejectItemToggle = (subItemId: number) => {
+    if (rejectedItems[subItemId] !== undefined) {
+      const next = { ...rejectedItems };
+      delete next[subItemId];
+      setRejectedItems(next);
+    } else {
+      setRejectingId(subItemId);
+      setTempReason("");
+    }
+  };
+
+  const handleConfirmItemReject = (subItemId: number) => {
+    if (!tempReason.trim()) {
+      toast.error("Vui lòng nhập lý do từ chối");
+      return;
+    }
+    setRejectedItems(prev => ({
+      ...prev,
+      [subItemId]: tempReason
+    }));
+    setRejectingId(null);
+    setTempReason("");
+  };
+
+  const handleSendBackRejection = async (id: number) => {
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const itemsList = Object.entries(rejectedItems).map(([sub_item_id, reason]) => ({
+        sub_item_id: Number(sub_item_id),
+        reason
+      }));
+
+      if (itemsList.length === 0) {
+        toast.error("Vui lòng từ chối ít nhất một tiêu chí trước khi trả lại.");
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/evaluations/${id}/reject-details/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          rejected_items: itemsList,
+          reviewNote: reviewNote || "Từ chối một số tiêu chí tự đánh giá không phù hợp."
+        })
+      });
+
+      if (res.ok) {
+        toast.success("Đã trả lại phiếu tự đánh giá cho sinh viên chỉnh sửa!");
+        fetchClassAndEvals();
+        setIsDetailOpen(false);
+        setReviewNote("");
+        setRejectedItems({});
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.message || "Không thể gửi yêu cầu chỉnh sửa");
       }
     } catch (err) {
       toast.error("Lỗi kết nối");
@@ -284,19 +370,78 @@ export default function ClassReview() {
               </div>
 
               <div className="space-y-4">
-                <p className="font-semibold text-sm border-b pb-2">Chi tiết điểm các tiêu chí chính</p>
-                {criteria.filter(c => c.criteria_set === selectedEval.criteria_set).map(c => {
-                  const sc = selectedEval.scores[c.id] || 0;
-                  return (
-                    <div key={c.id} className="space-y-1.5">
-                      <div className="flex justify-between text-sm">
-                        <span><span className="text-primary font-bold">{c.code}.</span> {c.name}</span>
-                        <span className="font-semibold">{sc}/{c.max_score}</span>
+                <p className="font-semibold text-sm border-b pb-2">Bảng tự đánh giá của Sinh viên</p>
+                {criteria
+                  .filter(c => c.criteria_set === selectedEval.criteria_set)
+                  .map(c => {
+                    const sc = selectedEval.scores[String(c.id)] || 0;
+                    return (
+                      <div key={c.id} className="space-y-2 border rounded-xl p-4 bg-muted/10">
+                        <div className="flex justify-between items-center text-sm font-bold border-b pb-2">
+                          <span><span className="text-primary">{c.code}.</span> {c.name}</span>
+                          <span>{sc}/{c.max_score} điểm</span>
+                        </div>
+                        
+                        {(c.groups || []).map((group: any) => (
+                          <div key={group.id} className="pl-2 space-y-2 mt-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{group.name}</p>
+                            <div className="grid gap-2">
+                              {(group.subItems || []).map((item: any) => {
+                                const detail = (selectedEval.details || []).find((d: any) => d.sub_item_id === Number(item.id));
+                                const scoreVal = detail ? detail.score : 0;
+                                const isRejected = rejectedItems[item.id] !== undefined;
+                                const rejectReason = rejectedItems[item.id];
+                                
+                                return (
+                                  <div key={item.id} className="flex flex-col p-2.5 rounded-lg border bg-background text-xs gap-2">
+                                    <div className="flex items-center justify-between gap-4">
+                                      <div className="flex-1">
+                                        <p className="font-semibold">{item.name}</p>
+                                        <p className="text-[10px] text-muted-foreground">Điểm tối đa: {item.max_score}</p>
+                                      </div>
+                                      <div className="flex items-center gap-3">
+                                        <span className="font-mono font-bold text-sm bg-muted px-2 py-0.5 rounded">{scoreVal}đ</span>
+                                        {!selectedEval.class_confirmed && selectedEval.status === "class_pending" && (
+                                          <Button 
+                                            variant={isRejected ? "destructive" : "outline"} 
+                                            size="sm" 
+                                            className="h-7 text-[10px] py-1 px-2.5"
+                                            onClick={() => handleRejectItemToggle(item.id)}
+                                          >
+                                            {isRejected ? "Hủy từ chối" : "Từ chối"}
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Reject reason input */}
+                                    {rejectingId === item.id && (
+                                      <div className="flex gap-2 items-center mt-1 bg-muted/40 p-2 rounded border border-dashed">
+                                        <Input 
+                                          placeholder="Nhập lý do từ chối..." 
+                                          value={tempReason} 
+                                          onChange={e => setTempReason(e.target.value)} 
+                                          className="h-8 text-xs bg-background"
+                                        />
+                                        <Button size="sm" className="h-8 text-xs px-3" onClick={() => handleConfirmItemReject(item.id)}>Lưu</Button>
+                                      </div>
+                                    )}
+
+                                    {/* Rejected warning */}
+                                    {isRejected && rejectingId !== item.id && (
+                                      <div className="text-[10px] font-semibold text-destructive mt-0.5 bg-destructive/5 p-1.5 rounded border border-destructive/20">
+                                        Lý do từ chối: {rejectReason}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <Progress value={(sc / c.max_score) * 100} />
-                    </div>
-                  );
-                })}
+                    );
+                  })}
               </div>
 
               <div className="space-y-2">
@@ -304,10 +449,21 @@ export default function ClassReview() {
                 <Textarea id="reviewNote" value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Nhập nhận xét hoặc lưu ý..." />
               </div>
 
-              <DialogFooter className="gap-2">
+              <DialogFooter className="gap-2 flex-wrap sm:justify-end">
                 <Button variant="outline" onClick={() => setIsDetailOpen(false)}>Quay lại</Button>
+                
+                {!selectedEval.class_confirmed && selectedEval.status === "class_pending" && Object.keys(rejectedItems).length > 0 && (
+                  <Button 
+                    variant="destructive"
+                    className="gap-1 bg-red-600 hover:bg-red-700 text-white"
+                    onClick={() => handleSendBackRejection(selectedEval.id)}
+                  >
+                    Trả lại sửa đổi ({Object.keys(rejectedItems).length})
+                  </Button>
+                )}
+
                 {!selectedEval.class_confirmed && selectedEval.status === "class_pending" && (
-                  <Button className="bg-success hover:bg-success/90 gap-1" onClick={() => handleConfirmSingle(selectedEval.id)}>
+                  <Button className="bg-success hover:bg-success/90 gap-1 text-white" onClick={() => handleConfirmSingle(selectedEval.id)}>
                     <CheckCircle2 className="h-4 w-4" /> Xác nhận rà soát
                   </Button>
                 )}

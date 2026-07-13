@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { classificationColor } from "@/lib/mock-data";
 import { normalizeSearch } from "@/lib/search";
@@ -25,6 +26,25 @@ export default function Approvals() {
   const [viewing, setViewing] = useState<any | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [locked, setLocked] = useState(false);
+  const [rejectedItems, setRejectedItems] = useState<Record<number, string>>({});
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [tempReason, setTempReason] = useState("");
+
+  useEffect(() => {
+    if (viewing) {
+      const initialRejects: Record<number, string> = {};
+      (viewing.details || []).forEach((det: any) => {
+        if (det.is_rejected) {
+          initialRejects[det.sub_item_id] = det.reject_reason || "Không phù hợp";
+        }
+      });
+      setRejectedItems(initialRejects);
+    } else {
+      setRejectedItems({});
+    }
+    setRejectingId(null);
+    setTempReason("");
+  }, [viewing]);
 
   const userRoles = user?.roles || (user?.role ? [user.role] : []);
   const isAdvisor = userRoles.includes("advisor");
@@ -72,12 +92,9 @@ export default function Approvals() {
     e.semester,
     e.year,
   ].join(" ")).includes(globalSearch));
-  const drafts = visibleEvals.filter(e => e.status === "draft" || e.status === "published");
-  const pending = visibleEvals.filter(e => {
-    if (isAdvisor) return e.status === "advisor_pending";
-    if (isAffairs) return e.status === "pending" || e.status === "class_pending";
-    return e.status === "pending" || e.status === "advisor_pending" || e.status === "class_pending";
-  });
+  const pending = visibleEvals.filter(e => 
+    e.status === "draft" || e.status === "published" || e.status === "class_pending" || e.status === "advisor_pending" || e.status === "pending"
+  );
   const approved = visibleEvals.filter(e => e.status === "approved" || e.status === "locked");
   const rejected = visibleEvals.filter(e => e.status === "rejected");
 
@@ -108,6 +125,72 @@ export default function Approvals() {
         setReviewNote("");
       } else {
         toast.error("Không thể cập nhật kết quả duyệt");
+      }
+    } catch (err) {
+      toast.error("Lỗi kết nối");
+    }
+  };
+
+  const handleRejectItemToggle = (subItemId: number) => {
+    if (rejectedItems[subItemId] !== undefined) {
+      const next = { ...rejectedItems };
+      delete next[subItemId];
+      setRejectedItems(next);
+    } else {
+      setRejectingId(subItemId);
+      setTempReason("");
+    }
+  };
+
+  const handleConfirmItemReject = (subItemId: number) => {
+    if (!tempReason.trim()) {
+      toast.error("Vui lòng nhập lý do từ chối");
+      return;
+    }
+    setRejectedItems(prev => ({
+      ...prev,
+      [subItemId]: tempReason
+    }));
+    setRejectingId(null);
+    setTempReason("");
+  };
+
+  const handleSendBackRejection = async (id: number) => {
+    try {
+      const token = localStorage.getItem("drl_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const itemsList = Object.entries(rejectedItems).map(([sub_item_id, reason]) => ({
+        sub_item_id: Number(sub_item_id),
+        reason
+      }));
+
+      if (itemsList.length === 0) {
+        toast.error("Vui lòng từ chối ít nhất một tiêu chí trước khi trả lại.");
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/evaluations/${id}/reject-details/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          rejected_items: itemsList,
+          reviewNote: reviewNote || "Từ chối một số tiêu chí tự đánh giá không phù hợp."
+        })
+      });
+
+      if (res.ok) {
+        toast.success("Đã trả lại phiếu tự đánh giá cho sinh viên chỉnh sửa!");
+        fetchEvalsAndCriteria();
+        setViewing(null);
+        setReviewNote("");
+        setRejectedItems({});
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.message || "Không thể gửi yêu cầu chỉnh sửa");
       }
     } catch (err) {
       toast.error("Lỗi kết nối");
@@ -250,9 +333,6 @@ export default function Approvals() {
             <Button variant="outline" className="gap-2 border-primary/20" onClick={handleExportReport}>
               <FileDown className="h-4 w-4" />Xuất báo cáo chính thức
             </Button>
-            <Button disabled={locked} onClick={handlePublishResults} className="bg-success text-success-foreground hover:bg-success/90 gap-2">
-              <Eye className="h-4 w-4" />Công bố phiếu cho sinh viên
-            </Button>
             <Button disabled={locked} onClick={handleLockResults} className="bg-destructive text-destructive-foreground hover:bg-destructive/90 gap-2">
               <Lock className="h-4 w-4" />{locked ? "Đã khóa kết quả" : "Khóa kết quả cuối cùng"}
             </Button>
@@ -276,14 +356,12 @@ export default function Approvals() {
         ))}
       </div>
 
-      <Tabs defaultValue="drafts">
-        <TabsList className="grid grid-cols-4 w-full md:w-fit">
-          <TabsTrigger value="drafts" className="text-[10px] sm:text-sm px-1">Nháp & Công bố ({drafts.length})</TabsTrigger>
+      <Tabs defaultValue="pending">
+        <TabsList className="grid grid-cols-3 w-full md:w-fit">
           <TabsTrigger value="pending" className="text-[10px] sm:text-sm px-1">Chờ duyệt ({pending.length})</TabsTrigger>
           <TabsTrigger value="approved" className="text-[10px] sm:text-sm px-1">Đã duyệt & Khóa ({approved.length})</TabsTrigger>
           <TabsTrigger value="rejected" className="text-[10px] sm:text-sm px-1">Từ chối ({rejected.length})</TabsTrigger>
         </TabsList>
-        <TabsContent value="drafts" className="mt-4">{renderTable(drafts)}</TabsContent>
         <TabsContent value="pending" className="mt-4">{renderTable(pending)}</TabsContent>
         <TabsContent value="approved" className="mt-4">{renderTable(approved)}</TabsContent>
         <TabsContent value="rejected" className="mt-4">{renderTable(rejected)}</TabsContent>
@@ -308,19 +386,79 @@ export default function Approvals() {
                 </div>
               </div>
 
-              <div className="space-y-3">
-                {criteria.filter(c => c.criteria_set === viewing.criteria_set).map(c => {
-                  const sc = viewing.scores[c.id] || 0;
-                  return (
-                    <div key={c.id}>
-                      <div className="flex justify-between text-sm mb-1.5">
-                        <span><span className="text-primary font-bold">{c.code}.</span> {c.name}</span>
-                        <span className="font-semibold">{sc}/{c.max_score}</span>
+              <div className="space-y-4">
+                <p className="font-semibold text-sm border-b pb-2">Bảng tự đánh giá của Sinh viên</p>
+                {criteria
+                  .filter(c => c.criteria_set === viewing.criteria_set)
+                  .map(c => {
+                    const sc = viewing.scores[String(c.id)] || 0;
+                    return (
+                      <div key={c.id} className="space-y-2 border rounded-xl p-4 bg-muted/10">
+                        <div className="flex justify-between items-center text-sm font-bold border-b pb-2">
+                          <span><span className="text-primary">{c.code}.</span> {c.name}</span>
+                          <span>{sc}/{c.max_score} điểm</span>
+                        </div>
+                        
+                        {(c.groups || []).map((group: any) => (
+                          <div key={group.id} className="pl-2 space-y-2 mt-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{group.name}</p>
+                            <div className="grid gap-2">
+                              {(group.subItems || []).map((item: any) => {
+                                const detail = (viewing.details || []).find((d: any) => d.sub_item_id === Number(item.id));
+                                const scoreVal = detail ? detail.score : 0;
+                                const isRejected = rejectedItems[item.id] !== undefined;
+                                const rejectReason = rejectedItems[item.id];
+                                
+                                return (
+                                  <div key={item.id} className="flex flex-col p-2.5 rounded-lg border bg-background text-xs gap-2">
+                                    <div className="flex items-center justify-between gap-4">
+                                      <div className="flex-1">
+                                        <p className="font-semibold">{item.name}</p>
+                                        <p className="text-[10px] text-muted-foreground">Điểm tối đa: {item.max_score}</p>
+                                      </div>
+                                      <div className="flex items-center gap-3">
+                                        <span className="font-mono font-bold text-sm bg-muted px-2 py-0.5 rounded">{scoreVal}đ</span>
+                                        {(viewing.status !== "approved" && viewing.status !== "locked") && (
+                                          <Button 
+                                            variant={isRejected ? "destructive" : "outline"} 
+                                            size="sm" 
+                                            className="h-7 text-[10px] py-1 px-2.5"
+                                            onClick={() => handleRejectItemToggle(item.id)}
+                                          >
+                                            {isRejected ? "Hủy từ chối" : "Từ chối"}
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Reject reason input */}
+                                    {rejectingId === item.id && (
+                                      <div className="flex gap-2 items-center mt-1 bg-muted/40 p-2 rounded border border-dashed">
+                                        <Input 
+                                          placeholder="Nhập lý do từ chối..." 
+                                          value={tempReason} 
+                                          onChange={e => setTempReason(e.target.value)} 
+                                          className="h-8 text-xs bg-background"
+                                        />
+                                        <Button size="sm" className="h-8 text-xs px-3" onClick={() => handleConfirmItemReject(item.id)}>Lưu</Button>
+                                      </div>
+                                    )}
+
+                                    {/* Rejected warning */}
+                                    {isRejected && rejectingId !== item.id && (
+                                      <div className="text-[10px] font-semibold text-destructive mt-0.5 bg-destructive/5 p-1.5 rounded border border-destructive/20">
+                                        Lý do từ chối: {rejectReason}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <Progress value={(sc / c.max_score) * 100} />
-                    </div>
-                  );
-                })}
+                    );
+                  })}
               </div>
 
               {viewing.note && (
@@ -338,20 +476,31 @@ export default function Approvals() {
                 <Textarea id="reviewNote" value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Nhập lý do từ chối, yêu cầu sửa đổi hoặc phản hồi..." />
               </div>
 
-              <DialogFooter className="gap-2">
+              <DialogFooter className="gap-2 flex-wrap sm:justify-end">
                 <Button variant="outline" onClick={() => setViewing(null)}>Quay lại</Button>
                 
-                {isAdvisor && viewing.status === "advisor_pending" && (
+                {/* Item-level send back button */}
+                {Object.keys(rejectedItems).length > 0 && (
+                  <Button 
+                    variant="destructive"
+                    className="gap-1 bg-red-600 hover:bg-red-700 text-white"
+                    onClick={() => handleSendBackRejection(viewing.id)}
+                  >
+                    Trả lại sửa đổi ({Object.keys(rejectedItems).length})
+                  </Button>
+                )}
+
+                {isAdvisor && viewing.status !== "approved" && viewing.status !== "locked" && Object.keys(rejectedItems).length === 0 && (
                   <>
-                    <Button variant="destructive" onClick={() => decide(viewing.id, "rejected")}>Từ chối</Button>
-                    <Button className="bg-success hover:bg-success/90" onClick={() => decide(viewing.id, "pending")}>Duyệt & Gửi Trường</Button>
+                    <Button variant="destructive" onClick={() => decide(viewing.id, "rejected")}>Từ chối tất cả</Button>
+                    <Button className="bg-success hover:bg-success/90 text-white" onClick={() => decide(viewing.id, "pending")}>Duyệt & Gửi Trường</Button>
                   </>
                 )}
 
-                {isAffairs && viewing.status === "pending" && (
+                {isAffairs && viewing.status !== "approved" && viewing.status !== "locked" && Object.keys(rejectedItems).length === 0 && (
                   <>
-                    <Button variant="destructive" onClick={() => decide(viewing.id, "rejected")}>Từ chối</Button>
-                    <Button className="bg-success hover:bg-success/90" onClick={() => decide(viewing.id, "approved")}>Phê duyệt hoàn tất</Button>
+                    <Button variant="destructive" onClick={() => decide(viewing.id, "rejected")}>Từ chối tất cả</Button>
+                    <Button className="bg-success hover:bg-success/90 text-white" onClick={() => decide(viewing.id, "approved")}>Phê duyệt hoàn tất</Button>
                   </>
                 )}
               </DialogFooter>
