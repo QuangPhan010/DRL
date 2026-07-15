@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import FaceVerificationCamera, { FaceVerificationData } from "@/components/FaceVerificationCamera";
-import { getFreshAttendanceLocation, GpsPosition } from "@/lib/geolocation";
 import Loading from "./Loading";
 
 export default function ActivityDetail() {
@@ -86,23 +85,18 @@ export default function ActivityDetail() {
   const [isCheckOutSimOpen, setIsCheckOutSimOpen] = useState(false);
   const [simDeviceId, setSimDeviceId] = useState("device_" + (user?.studentId || "SV001"));
   const [faceVerification, setFaceVerification] = useState<FaceVerificationData | null>(null);
-  const [gpsPosition, setGpsPosition] = useState<GpsPosition | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isExportingParticipants, setIsExportingParticipants] = useState(false);
 
   const handleFaceVerified = async (data: FaceVerificationData | null) => {
     setFaceVerification(null);
-    setGpsPosition(null);
     if (!data) return;
-    const gps = await getFreshAttendanceLocation();
-    setGpsPosition(gps);
     setFaceVerification(data);
   };
 
   useEffect(() => {
     if (!isCheckInSimOpen && !isCheckOutSimOpen) {
       setFaceVerification(null);
-      setGpsPosition(null);
     }
   }, [isCheckInSimOpen, isCheckOutSimOpen]);
 
@@ -404,8 +398,8 @@ export default function ActivityDetail() {
 
   const handleCheckIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!faceVerification || !gpsPosition) {
-      toast.error("Vui lòng xác thực khuôn mặt và GPS trước.");
+    if (!faceVerification) {
+      toast.error("Vui lòng xác thực khuôn mặt trước.");
       return;
     }
     try {
@@ -419,7 +413,6 @@ export default function ActivityDetail() {
         },
         body: JSON.stringify({
           ...faceVerification,
-          ...gpsPosition,
           deviceId: simDeviceId,
         })
       });
@@ -440,8 +433,8 @@ export default function ActivityDetail() {
 
   const handleCheckOut = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!faceVerification || !gpsPosition) {
-      toast.error("Vui lòng xác thực khuôn mặt và GPS trước.");
+    if (!faceVerification) {
+      toast.error("Vui lòng xác thực khuôn mặt trước.");
       return;
     }
     try {
@@ -455,7 +448,6 @@ export default function ActivityDetail() {
         },
         body: JSON.stringify({
           ...faceVerification,
-          ...gpsPosition,
           deviceId: simDeviceId,
         })
       });
@@ -1159,7 +1151,7 @@ export default function ActivityDetail() {
           {isVerifying && (
             <div className="absolute inset-0 bg-background/80 z-50 flex flex-col items-center justify-center gap-2">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm font-semibold">Đang đối sánh Face ID & GPS...</p>
+              <p className="text-sm font-semibold">Đang đối sánh Face ID...</p>
             </div>
           )}
           <DialogHeader>
@@ -1173,7 +1165,7 @@ export default function ActivityDetail() {
 
             <DialogFooter className="border-t pt-4">
               <Button type="button" variant="outline" onClick={() => setIsCheckInSimOpen(false)}>Hủy</Button>
-              <Button type="submit" className="bg-success text-white" disabled={!faceVerification || !gpsPosition}>Xác nhận Check-in</Button>
+              <Button type="submit" className="bg-success text-white" disabled={!faceVerification}>Xác nhận Check-in</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -1185,7 +1177,7 @@ export default function ActivityDetail() {
           {isVerifying && (
             <div className="absolute inset-0 bg-background/80 z-50 flex flex-col items-center justify-center gap-2">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm font-semibold">Đang đối sánh Face ID & GPS...</p>
+              <p className="text-sm font-semibold">Đang đối sánh Face ID...</p>
             </div>
           )}
           <DialogHeader>
@@ -1199,7 +1191,7 @@ export default function ActivityDetail() {
 
             <DialogFooter className="border-t pt-4">
               <Button type="button" variant="outline" onClick={() => setIsCheckOutSimOpen(false)}>Hủy</Button>
-              <Button type="submit" className="bg-success text-white" disabled={!faceVerification || !gpsPosition}>Xác nhận Check-out</Button>
+              <Button type="submit" className="bg-success text-white" disabled={!faceVerification}>Xác nhận Check-out</Button>
             </DialogFooter>
           </form>
         </DialogContent>

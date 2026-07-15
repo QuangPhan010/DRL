@@ -20,9 +20,6 @@ Di chuyển vào thư mục dự án chứa file `requirements.txt`:
 # Cài đặt các thư viện cần thiết
 pip install -r requirements.txt
 
-# Cài thêm thư viện Face ID (tùy chọn, yêu cầu Python 3.10-3.13)
-pip install -r requirements-face.txt
-
 # Khởi tạo/cập nhật cơ sở dữ liệu và chạy backend
 python backend/manage.py migrate
 python backend/manage.py runserver
@@ -46,3 +43,4 @@ pnpm dev
 Frontend sẽ chạy tại: [http://localhost:5173/](http://localhost:5173/)
 
 ---
+

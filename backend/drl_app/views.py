@@ -190,58 +190,6 @@ def _verify_attendance_location(request, activity, student):
         'longitude': 0.0,
     }, None
 
-    maximum_accuracy = max(int(activity.radius_meters or 100), 100)
-    if accuracy > maximum_accuracy:
-        return None, Response(
-            {
-                'error': f'Tín hiệu GPS chưa đủ chính xác (sai số {accuracy:.0f} m). Vui lòng thử lại ngoài khu vực thoáng.',
-                'gps_accuracy': accuracy,
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    activity_latitude = float(activity.latitude)
-    activity_longitude = float(activity.longitude)
-    latitude_delta = math.radians(latitude - activity_latitude)
-    longitude_delta = math.radians(longitude - activity_longitude)
-    start_latitude = math.radians(activity_latitude)
-    end_latitude = math.radians(latitude)
-    haversine_value = (
-        math.sin(latitude_delta / 2) ** 2
-        + math.sin(longitude_delta / 2) ** 2
-        * math.cos(start_latitude)
-        * math.cos(end_latitude)
-    )
-    distance = 6371000 * 2 * math.asin(math.sqrt(haversine_value))
-    allowed_radius = int(activity.radius_meters or 100)
-
-    if distance > allowed_radius:
-        FraudDetection.objects.create(
-            student=student,
-            activity=activity,
-            rule_code='GPS_OUT_OF_RANGE',
-            severity='High',
-            description=(
-                f'Face ID hợp lệ nhưng GPS cách hoạt động {distance:.1f} m '
-                f'(giới hạn {allowed_radius} m).'
-            ),
-        )
-        return None, Response(
-            {
-                'error': f'Bạn đang ở ngoài phạm vi hoạt động ({distance:.0f}/{allowed_radius} m).',
-                'distance_meters': distance,
-                'gps_accuracy': accuracy,
-            },
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    return {
-        'latitude': latitude,
-        'longitude': longitude,
-        'accuracy': accuracy,
-        'distance': distance,
-    }, None
-
 
 def _can_review_activity_attendance(user, activity):
     if not user or not user.is_authenticated:

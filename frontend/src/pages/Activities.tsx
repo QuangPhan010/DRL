@@ -15,7 +15,6 @@ import { useAuth, API_URL } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FaceVerificationCamera, { FaceVerificationData } from "@/components/FaceVerificationCamera";
-import { getFreshAttendanceLocation, GpsPosition } from "@/lib/geolocation";
 import { cn } from "@/lib/utils";
 import { getOrganizerStyle } from "@/lib/organizer-highlight";
 
@@ -86,15 +85,11 @@ export default function Activities() {
   const [isCheckOutSimOpen, setIsCheckOutSimOpen] = useState(false);
   const [simDeviceId, setSimDeviceId] = useState("phone_device_sim");
   const [faceVerification, setFaceVerification] = useState<FaceVerificationData | null>(null);
-  const [gpsPosition, setGpsPosition] = useState<GpsPosition | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
   const handleFaceVerified = async (data: FaceVerificationData | null) => {
     setFaceVerification(null);
-    setGpsPosition(null);
     if (!data) return;
-    const gps = await getFreshAttendanceLocation();
-    setGpsPosition(gps);
     setFaceVerification(data);
   };
 
@@ -102,7 +97,6 @@ export default function Activities() {
     setSelectedActivity(act);
     setSimDeviceId("device_" + (user?.studentId || "SV001"));
     setFaceVerification(null);
-    setGpsPosition(null);
     setIsCheckInSimOpen(true);
   };
 
@@ -110,7 +104,6 @@ export default function Activities() {
     setSelectedActivity(act);
     setSimDeviceId("device_" + (user?.studentId || "SV001"));
     setFaceVerification(null);
-    setGpsPosition(null);
     setIsCheckOutSimOpen(true);
   };
 
@@ -533,8 +526,8 @@ export default function Activities() {
   const handleCheckInSim = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedActivity) return;
-    if (!faceVerification || !gpsPosition) {
-      toast.error("Vui lòng xác thực khuôn mặt và GPS trước.");
+    if (!faceVerification) {
+      toast.error("Vui lòng xác thực khuôn mặt trước.");
       return;
     }
     try {
@@ -550,7 +543,6 @@ export default function Activities() {
         headers,
         body: JSON.stringify({
           ...faceVerification,
-          ...gpsPosition,
           deviceId: simDeviceId,
         })
       });
@@ -580,8 +572,8 @@ export default function Activities() {
   const handleCheckOutSim = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedActivity) return;
-    if (!faceVerification || !gpsPosition) {
-      toast.error("Vui lòng xác thực khuôn mặt và GPS trước.");
+    if (!faceVerification) {
+      toast.error("Vui lòng xác thực khuôn mặt trước.");
       return;
     }
     try {
@@ -597,7 +589,6 @@ export default function Activities() {
         headers,
         body: JSON.stringify({
           ...faceVerification,
-          ...gpsPosition,
           deviceId: simDeviceId,
         })
       });
@@ -625,44 +616,38 @@ export default function Activities() {
   };
 
   const uniqueOrganizers = useMemo(() => {
+    const currentTabActs = activities.filter(act => activeTab === "external" ? !!act.is_external : !act.is_external);
     return Array.from(
       new Set(
-        activities
+        currentTabActs
           .map((act) => act.organizer?.trim())
           .filter((org): org is string => Boolean(org))
       )
     );
-  }, [activities]);
+  }, [activities, activeTab]);
 
   const filteredActivities = useMemo(() => {
-    return activities.filter((act) => {
+    const list = activities.filter((act) => {
       const matchesTab = activeTab === "external" ? !!act.is_external : !act.is_external;
-      if (!matchesTab) return false;
-
-      if (selectedOrgType === "all") return true;
-      const organizerName = act.organizer?.trim() || "";
-      const matchedOrg = orgList.find(
-        (org) => org.name.toLowerCase() === organizerName.toLowerCase()
-      );
-      if (matchedOrg) {
-        return matchedOrg.type === selectedOrgType;
-      }
-      const nameLower = organizerName.toLowerCase();
-      if (selectedOrgType === "Đoàn - Hội") {
-        return nameLower.includes("đoàn") || nameLower.includes("hội");
-      }
-      if (selectedOrgType === "Khoa") {
-        return nameLower.includes("khoa");
-      }
-      if (selectedOrgType === "CLB") {
-        return nameLower.includes("clb") || nameLower.includes("câu lạc bộ");
-      }
-      if (selectedOrgType === "Phòng/Ban") {
-        return nameLower.includes("phòng") || nameLower.includes("ban");
-      }
-      return !nameLower.includes("đoàn") && !nameLower.includes("hội") && !nameLower.includes("khoa") && !nameLower.includes("clb") && !nameLower.includes("câu lạc bộ") && !nameLower.includes("phòng") && !nameLower.includes("ban");
+      return matchesTab;
     });
-  }, [activities, selectedOrgType, orgList, activeTab]);
+
+    const now = new Date();
+    const getPriority = (act: Activity) => {
+      if (act.status === "completed") return 3; // Thấp nhất
+      const start = parseDateTime(act.date, act.start_time);
+      const end = parseDateTime(act.date, act.end_time);
+      if (start && end && now >= start && now <= end) {
+        return 1; // Cao nhất (Đang diễn ra)
+      }
+      if (end && now > end) {
+        return 3; // Đã kết thúc
+      }
+      return 2; // Sắp diễn ra
+    };
+
+    return [...list].sort((a, b) => getPriority(a) - getPriority(b));
+  }, [activities, activeTab]);
 
   return (
     <div className="space-y-6">
@@ -684,7 +669,7 @@ export default function Activities() {
         )}
       </div>
 
-      <Tabs value={activeTab} onValueChange={(val: any) => { setActiveTab(val); setSelectedOrgType("all"); }} className="w-full">
+      <Tabs value={activeTab} onValueChange={(val: any) => { setActiveTab(val); setHighlightedOrganizer("all"); }} className="w-full">
         <TabsList className="grid w-full max-w-[400px] grid-cols-2">
           <TabsTrigger value="internal" className="text-[11px] sm:text-sm px-1.5 py-1">Hoạt động trong trường</TabsTrigger>
           <TabsTrigger value="external" className="text-[11px] sm:text-sm px-1.5 py-1">Hoạt động ngoài trường</TabsTrigger>
@@ -692,44 +677,23 @@ export default function Activities() {
       </Tabs>
 
       {/* Filter & Highlight Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-muted/20 rounded-xl border border-muted-foreground/10 mt-6">
-        {/* Sub-tabs for Organizer Types */}
-        <div className="flex flex-wrap gap-2">
-          {["all", "Đoàn - Hội", "Khoa", "CLB", "Phòng/Ban", "Khác"].map((type) => (
-            <Button
-              key={type}
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelectedOrgType(type)}
-              className={cn(
-                "h-8 text-xs rounded-lg transition-all px-3 border",
-                selectedOrgType === type
-                  ? "bg-primary text-white font-medium shadow hover:bg-primary/95 hover:text-white border-transparent"
-                  : "text-foreground bg-background border-border/80 hover:bg-muted hover:text-foreground"
-              )}
-            >
-              {type === "all" ? "Tất cả đơn vị" : type}
-            </Button>
-          ))}
-        </div>
-
-        {/* Highlight Dropdown */}
-        <div className="flex items-center gap-2">
-          <Label className="text-xs text-muted-foreground whitespace-nowrap font-medium">Highlight tổ chức:</Label>
-          <Select value={highlightedOrganizer} onValueChange={setHighlightedOrganizer}>
-            <SelectTrigger className="w-[200px] h-8 text-xs bg-background">
-              <SelectValue placeholder="Chọn đơn vị" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tất cả đơn vị (Không highlight)</SelectItem>
-              {uniqueOrganizers.map((orgName) => (
-                <SelectItem key={orgName} value={orgName}>
-                  {orgName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="flex flex-wrap gap-2 p-4 bg-muted/20 rounded-xl border border-muted-foreground/10 mt-6">
+        {["all", ...uniqueOrganizers].map((orgName) => (
+          <Button
+            key={orgName}
+            variant="ghost"
+            size="sm"
+            onClick={() => setHighlightedOrganizer(orgName)}
+            className={cn(
+              "h-8 text-xs rounded-lg transition-all px-3 border",
+              highlightedOrganizer === orgName
+                ? "bg-primary text-white font-medium shadow hover:bg-primary/95 hover:text-white border-transparent"
+                : "text-foreground bg-background border-border/80 hover:bg-muted hover:text-foreground"
+            )}
+          >
+            {orgName === "all" ? "Tất cả đơn vị" : orgName}
+          </Button>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1299,7 +1263,7 @@ export default function Activities() {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCheckInSimOpen(false)}>Hủy</Button>
-              <Button type="submit" disabled={!faceVerification || !gpsPosition} className="bg-success text-white hover:bg-success/90">Xác nhận Check-in</Button>
+              <Button type="submit" disabled={!faceVerification} className="bg-success text-white hover:bg-success/90">Xác nhận Check-in</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -1311,7 +1275,7 @@ export default function Activities() {
           {isVerifying && (
             <div className="absolute inset-0 bg-background/80 z-50 flex flex-col items-center justify-center gap-2">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm font-semibold">Đang đối sánh Face ID & GPS...</p>
+              <p className="text-sm font-semibold">Đang đối sánh Face ID...</p>
             </div>
           )}
           <DialogHeader>
@@ -1327,7 +1291,7 @@ export default function Activities() {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCheckOutSimOpen(false)}>Hủy</Button>
-              <Button type="submit" disabled={!faceVerification || !gpsPosition} className="bg-warning text-black dark:text-white hover:bg-warning/90">Xác nhận Check-out</Button>
+              <Button type="submit" disabled={!faceVerification} className="bg-warning text-black dark:text-white hover:bg-warning/90">Xác nhận Check-out</Button>
             </DialogFooter>
           </form>
         </DialogContent>
