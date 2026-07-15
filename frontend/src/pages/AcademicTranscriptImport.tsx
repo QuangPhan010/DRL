@@ -195,7 +195,7 @@ export default function AcademicTranscriptImport() {
   const [isImportingAsync, setIsImportingAsync] = useState(false);
 
   // Attendance tab states
-  const [activeTab, setActiveTab] = useState("transcript");
+  const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get("tab") || "transcript");
   const [activities, setActivities] = useState<any[]>([]);
   const [selectedActivityId, setSelectedActivityId] = useState("");
   const [attendanceText, setAttendanceText] = useState("");

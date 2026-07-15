@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { Sparkles, Plus, Edit, Trash2, Settings2, FolderPlus, FilePlus, Copy, CheckCircle2, Layers3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -797,7 +797,7 @@ export default function Criteria() {
                           return criteria.map(c => {
                             const userScore = myEvaluation?.scores?.[c.id.toString()] ?? 0;
                             return (
-                              <>
+                              <Fragment key={c.id}>
                                 <TableRow key={`c-${c.id}`} className="bg-muted/70 font-bold hover:bg-muted/80 border-b border-border">
                                   <TableCell className="text-center border border-border"></TableCell>
                                   <TableCell className="font-bold text-[#1e74a4] border border-border">
@@ -808,7 +808,7 @@ export default function Criteria() {
                                 </TableRow>
 
                                 {c.groups?.map(g => (
-                                  <>
+                                  <Fragment key={g.id}>
                                     <TableRow key={`g-${g.id}`} className="bg-muted/20 font-semibold hover:bg-muted/30 border-b border-border">
                                       <TableCell className="border border-border" />
                                       <TableCell className="pl-6 font-bold text-foreground/80 border border-border">{g.name}</TableCell>
@@ -830,9 +830,9 @@ export default function Criteria() {
                                         </TableRow>
                                       );
                                     })}
-                                  </>
+                                  </Fragment>
                                 ))}
-                              </>
+                              </Fragment>
                             );
                           });
                         })()}
@@ -952,7 +952,7 @@ export default function Criteria() {
                         let globalStt = 1;
                         return criteria.map(c => {
                           return (
-                            <>
+                            <Fragment key={c.id}>
                               {/* Level 1: Criterion Row */}
                               <TableRow key={`c-${c.id}`} className="bg-muted/70 font-bold hover:bg-muted/80 border-b border-border">
                                 <TableCell className="text-center border border-border"></TableCell>
@@ -964,7 +964,7 @@ export default function Criteria() {
 
                               {/* Level 2 & 3 Rows */}
                               {c.groups?.map(g => (
-                                <>
+                                <Fragment key={g.id}>
                                   {/* Level 2: Group Row */}
                                   <TableRow key={`g-${g.id}`} className="bg-muted/20 font-semibold hover:bg-muted/30 border-b border-border">
                                     <TableCell className="border border-border" />
@@ -983,9 +983,9 @@ export default function Criteria() {
                                       </TableRow>
                                     );
                                   })}
-                                </>
+                                </Fragment>
                               ))}
-                            </>
+                            </Fragment>
                           );
                         });
                       })()}
@@ -1099,8 +1099,8 @@ export default function Criteria() {
             </DialogTitle>
             <DialogDescription>
               {isEditingSet
-                ? "Cập nhật tên, học kỳ, năm học và thời gian hiệu lực cho bộ tiêu chí này."
-                : "Khai báo thời gian sử dụng. Sau khi kiểm tra cấu trúc, quản trị viên có thể chọn “Dùng bộ này”."}
+                ? "Cập nhật tên và mô tả cho bộ tiêu chí này."
+                : "Nhập thông tin bộ tiêu chí. Sau khi kiểm tra cấu trúc, quản trị viên có thể chọn “Dùng bộ này”."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1108,70 +1108,7 @@ export default function Criteria() {
               <Label>Tên bộ tiêu chí *</Label>
               <Input value={criteriaSetName} onChange={event => setCriteriaSetName(event.target.value)} placeholder="Ví dụ: Bộ tiêu chí HK2 2026-2027" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Học kỳ</Label>
-                <Select value={setSemester} onValueChange={setSetSemester}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(() => {
-                      const now = new Date();
-                      const currentYear = now.getMonth() + 1 >= 8 ? now.getFullYear() : now.getFullYear() - 1;
-                      const currentYearStr = `${currentYear}-${currentYear + 1}`;
-                      if (setAcademicYear !== currentYearStr) {
-                        return (
-                          <>
-                            <SelectItem value="HK1">Học kỳ 1</SelectItem>
-                            <SelectItem value="HK2">Học kỳ 2</SelectItem>
-                            <SelectItem value="HK3">Học kỳ 3</SelectItem>
-                          </>
-                        );
-                      }
-                      const month = now.getMonth() + 1;
-                      if (month >= 8 && month <= 12) {
-                        return <SelectItem value="HK1">Học kỳ 1</SelectItem>;
-                      } else if (month >= 1 && month <= 3) {
-                        return (
-                          <>
-                            <SelectItem value="HK1">Học kỳ 1</SelectItem>
-                            <SelectItem value="HK2">Học kỳ 2</SelectItem>
-                          </>
-                        );
-                      } else {
-                        return (
-                          <>
-                            <SelectItem value="HK1">Học kỳ 1</SelectItem>
-                            <SelectItem value="HK2">Học kỳ 2</SelectItem>
-                            <SelectItem value="HK3">Học kỳ 3</SelectItem>
-                          </>
-                        );
-                      }
-                    })()}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Năm học</Label>
-                <Select value={setAcademicYear} onValueChange={setSetAcademicYear}>
-                  <SelectTrigger><SelectValue placeholder="Chọn năm học" /></SelectTrigger>
-                  <SelectContent>
-                    {getAcademicYears().map((year) => (
-                      <SelectItem key={year} value={year}>{year}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Hiệu lực từ</Label>
-                <Input type="date" value={effectiveFrom} onChange={event => setEffectiveFrom(event.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>Hiệu lực đến</Label>
-                <Input type="date" value={effectiveTo} onChange={event => setEffectiveTo(event.target.value)} />
-              </div>
-            </div>
+
             <div className="space-y-2">
               <Label>Mô tả</Label>
               <Textarea value={criteriaSetDescription} onChange={event => setCriteriaSetDescription(event.target.value)} rows={2} />
@@ -1207,6 +1144,9 @@ export default function Criteria() {
             <DialogTitle className="font-display">
               {editing ? "Cấu hình Tiêu chí 3 cấp" : "Tạo mới Tiêu chí lớn (Cấp 1)"}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Cấu hình chi tiết các cấp và điểm số tối đa của tiêu chí.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 py-2">
             {/* Level 1 Fields */}

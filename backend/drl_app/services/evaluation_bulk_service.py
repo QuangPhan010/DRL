@@ -19,14 +19,18 @@ def save_evaluation_draft_bulk(*, evaluation, scores_data, note=None, user=None,
     )
 
     # 2. Batch Validation - Active Evaluation Session
-    session_exists = EvaluationSession.objects.filter(
-        evaluation=evaluation, status='active'
-    ).exists() or EvaluationSession.objects.filter(
-        student=evaluation.student, semester=evaluation.semester, year=evaluation.year, status='active'
-    ).exists()
-    
-    if not session_exists:
-        raise ValidationError('Phiếu đánh giá không có phiên hoạt động hợp lệ.')
+    is_student = user.role == 'student' if user else True
+    if is_student:
+        session_exists = EvaluationSession.objects.filter(
+            evaluation=evaluation, status='active'
+        ).exists() or EvaluationSession.objects.filter(
+            student=evaluation.student, semester=evaluation.semester, year=evaluation.year, status='active'
+        ).exists() or EvaluationSession.objects.filter(
+            semester=evaluation.semester, year=evaluation.year, student__isnull=True, status='active'
+        ).exists()
+        
+        if not session_exists:
+            raise ValidationError('Phiếu đánh giá không có phiên hoạt động hợp lệ.')
 
     # 3. Batch Validation - Criteria & Scores Limit
     manual_subitems = SubItem.objects.filter(
@@ -239,12 +243,14 @@ def async_bulk_init_evaluations(job_id, payload_data):
                         from django.core.mail import send_mail
                         from django.conf import settings
 
+                        semester_display = semester if str(semester).startswith("HK") or str(semester).startswith("Học kỳ") else f"HK{semester}"
+                        
                         student_user = User.objects.filter(student_id=student.student_id).first()
                         if student_user:
                             create_notification(
                                 user=student_user,
                                 title="Mở đợt đánh giá rèn luyện mới",
-                                message=f"Hệ thống đã mở đợt tự đánh giá rèn luyện cho HK{semester} {year}. Vui lòng tự chấm điểm của bạn trước hạn chót.",
+                                message=f"Hệ thống đã mở đợt tự đánh giá rèn luyện cho {semester_display} {year}. Vui lòng tự chấm điểm của bạn trước hạn chót.",
                                 type='evaluation',
                                 level='info',
                                 action_url='/'
@@ -253,11 +259,26 @@ def async_bulk_init_evaluations(job_id, payload_data):
                         if student.email:
                             start_date = SystemConfig.objects.filter(key='self_assessment_start').first()
                             deadline_date = SystemConfig.objects.filter(key='self_assessment_deadline').first()
-                            start_val = start_date.value if start_date else "Chưa cấu hình"
-                            deadline_val = deadline_date.value if deadline_date else "Chưa cấu hình"
                             
-                            email_subject = f"[ITC Point] Thông báo tự đánh giá điểm rèn luyện HK{semester} {year}"
-                            email_message = f"Chào {student.full_name},\n\nCổng tự đánh giá điểm rèn luyện trực tuyến đã chính thức được mở cho HK{semester} năm học {year}.\nVui lòng đăng nhập và thực hiện tự đánh giá trước hạn chót: {deadline_val}."
+                            def format_dt(dt_str):
+                                if not dt_str:
+                                    return "Chưa cấu hình"
+                                try:
+                                    from datetime import datetime
+                                    dt = datetime.fromisoformat(dt_str)
+                                    return dt.strftime("%d/%m/%Y %H:%M")
+                                except Exception:
+                                    try:
+                                        dt = datetime.strptime(dt_str, "%Y-%m-%d")
+                                        return dt.strftime("%d/%m/%Y")
+                                    except Exception:
+                                        return dt_str
+                            
+                            start_val = format_dt(start_date.value if start_date else None)
+                            deadline_val = format_dt(deadline_date.value if deadline_date else None)
+                            
+                            email_subject = f"[ITC Point] Thông báo tự đánh giá điểm rèn luyện {semester_display} {year}"
+                            email_message = f"Chào {student.full_name},\n\nCổng tự đánh giá điểm rèn luyện trực tuyến đã chính thức được mở cho {semester_display} năm học {year}.\nVui lòng đăng nhập và thực hiện tự đánh giá trước hạn chót: {deadline_val}."
                             
                             email_html = f"""
 <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); background-color: #ffffff;">
@@ -273,7 +294,7 @@ def async_bulk_init_evaluations(job_id, payload_data):
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 150px; text-transform: uppercase; letter-spacing: 0.5px;">Học kỳ / Năm học:</td>
-          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">HK{semester} - Năm học {year}</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">{semester_display} - Năm học {year}</td>
         </tr>
         <tr>
           <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Ngày mở cổng:</td>

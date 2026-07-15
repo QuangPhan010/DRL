@@ -236,7 +236,7 @@ class EvaluationSerializer(serializers.ModelSerializer):
             'total_score', 'maximum_score', 'points_missing', 'points_excess',
             'is_score_complete', 'classification',
             'status', 'submitted_at', 'self_submitted_at', 'reviewed_by', 'review_note',
-            'class_confirmed', 'criteria_set', 'details', 'scores'
+            'class_confirmed', 'version', 'criteria_set', 'details', 'scores'
         )
 
     def get_maximum_score(self, obj):
@@ -291,11 +291,29 @@ class ActivityParticipantSerializer(serializers.ModelSerializer):
         fields = ('id', 'student', 'student_id', 'student_name', 'class_name', 'status', 'evidence_url', 'checked_in_time', 'checked_out_time')
 
     def get_checked_in_time(self, obj):
-        checkin = obj.activity.checkins.filter(student=obj.student).order_by('-check_in_time').first()
+        cache = getattr(obj.activity, '_prefetched_objects_cache', {})
+        if 'checkins' in cache:
+            matched = [c for c in cache['checkins'] if c.student_id == obj.student_id]
+            if matched:
+                matched.sort(key=lambda x: x.check_in_time, reverse=True)
+                checkin = matched[0]
+            else:
+                checkin = None
+        else:
+            checkin = obj.activity.checkins.filter(student=obj.student).order_by('-check_in_time').first()
         return timezone.localtime(checkin.check_in_time).isoformat() if checkin else None
 
     def get_checked_out_time(self, obj):
-        checkout = obj.activity.checkouts.filter(student=obj.student).order_by('-check_out_time').first()
+        cache = getattr(obj.activity, '_prefetched_objects_cache', {})
+        if 'checkouts' in cache:
+            matched = [c for c in cache['checkouts'] if c.student_id == obj.student_id]
+            if matched:
+                matched.sort(key=lambda x: x.check_out_time, reverse=True)
+                checkout = matched[0]
+            else:
+                checkout = None
+        else:
+            checkout = obj.activity.checkouts.filter(student=obj.student).order_by('-check_out_time').first()
         return timezone.localtime(checkout.check_out_time).isoformat() if checkout else None
 
 class RoomSerializer(serializers.ModelSerializer):

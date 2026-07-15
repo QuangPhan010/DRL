@@ -652,7 +652,18 @@ export default function EvaluationSession() {
 
       // 3. Poll status
       const pollInterval = 1000;
+      let fakeProgress = 0;
+      const fakeInterval = window.setInterval(() => {
+        if (fakeProgress < payloads.length - 1) {
+          fakeProgress += 1;
+          setSavedCount(fakeProgress);
+        }
+      }, 150);
+
       return new Promise<void>((resolve, reject) => {
+        const cleanUp = () => {
+          window.clearInterval(fakeInterval);
+        };
         const checkStatus = async () => {
           try {
             const statusResponse = await fetch(`${API_URL}/evaluations/bulk-job/${jobId}/`, {
@@ -660,24 +671,32 @@ export default function EvaluationSession() {
             });
 
             if (!statusResponse.ok) {
+              cleanUp();
               reject(new Error("Lỗi khi kiểm tra tiến trình tạo phiếu."));
               return;
             }
 
             const currentJob = await statusResponse.json();
-            setSavedCount(currentJob.progress || 0);
+            if (currentJob.progress && currentJob.progress > fakeProgress) {
+              fakeProgress = currentJob.progress;
+              setSavedCount(fakeProgress);
+            }
 
             if (currentJob.status === "SUCCESS") {
+              cleanUp();
+              setSavedCount(scores.length);
               toast.success(`Đã lưu phiên và tạo ${currentJob.total} phiếu đánh giá nháp thành công!`);
               setSaving(false);
               resolve();
             } else if (currentJob.status === "FAILED") {
+              cleanUp();
               reject(new Error(currentJob.errorMessage || "Tiến trình tạo phiếu thất bại trên server."));
             } else {
               // Still running or pending, check again
               setTimeout(checkStatus, pollInterval);
             }
           } catch (err) {
+            cleanUp();
             reject(err);
           }
         };
@@ -790,14 +809,25 @@ export default function EvaluationSession() {
                 </Badge>
               </div>
             </div>
-            {(matchedTranscriptCount < scopedStudents.length || Object.keys(importedAttendance).length === 0) && (
+            {(scopedStudents.length === 0 || matchedTranscriptCount < scopedStudents.length || Object.keys(importedAttendance).length === 0) && (
               <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 text-xs rounded-lg p-3 space-y-2">
-                <p className="font-semibold">⚠️ Thiếu dữ liệu điểm danh lớp học hoặc học lực!</p>
+                <p className="font-semibold">⚠️ Thiếu dữ liệu tạo phiên:</p>
+                <ul className="list-disc pl-4 space-y-1">
+                  {scopedStudents.length === 0 && (
+                    <li>Chưa có sinh viên trong phạm vi đã chọn.</li>
+                  )}
+                  {scopedStudents.length > 0 && matchedTranscriptCount < scopedStudents.length && (
+                    <li>Thiếu dữ liệu học lực (mới có {matchedTranscriptCount}/{scopedStudents.length} SV).</li>
+                  )}
+                  {Object.keys(importedAttendance).length === 0 && (
+                    <li>Thiếu dữ liệu điểm danh lớp học.</li>
+                  )}
+                </ul>
                 <p>Bạn cần import thêm dữ liệu để có thể chuyển sang bước tiếp theo.</p>
                 <div className="flex gap-2 pt-1">
                   <a href="/academic-transcript-import" target="_blank" className="underline font-bold text-primary hover:text-primary-glow">Import học lực</a>
                   <span>·</span>
-                  <button onClick={() => setStep(2)} className="underline font-bold text-primary hover:text-primary-glow">Import điểm danh ở Bước 3</button>
+                  <a href="/academic-transcript-import?tab=attendance" target="_blank" className="underline font-bold text-primary hover:text-primary-glow">Import điểm danh</a>
                 </div>
               </div>
             )}
@@ -1199,7 +1229,15 @@ export default function EvaluationSession() {
         {step < steps.length - 1 && (
           <Button
             onClick={goNext}
-            disabled={(step === 4 && calculating) || (step === 3 && transcriptLoading)}
+            disabled={
+              (step === 4 && calculating) ||
+              (step === 3 && transcriptLoading) ||
+              (step === 0 && (
+                !scopedStudents.length ||
+                matchedTranscriptCount < scopedStudents.length ||
+                Object.keys(importedAttendance).length === 0
+              ))
+            }
           >
             {step === 3 && transcriptLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Tiếp tục<ArrowRight className="ml-2 h-4 w-4" />

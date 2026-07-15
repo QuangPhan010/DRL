@@ -71,7 +71,8 @@ class Command(BaseCommand):
                             from django.core.mail import send_mail
                             from django.conf import settings
                             email_subject = f"[ITC Point] Nhắc nhở: Còn {days_left} ngày hạn chót tự chấm điểm rèn luyện"
-                            email_message = f"Chào {student.full_name},\n\nHạn chót tự chấm điểm rèn luyện HK{semester} {year} của bạn là ngày {val}.\nVui lòng đăng nhập hệ thống và nộp phiếu tự chấm trước thời hạn.\n\n* Lưu ý: Nếu quá hạn, bạn sẽ nhận điểm 0 rèn luyện cho học kỳ này."
+                            semester_display = semester if str(semester).startswith("HK") or str(semester).startswith("Học kỳ") else f"HK{semester}"
+                            email_message = f"Chào {student.full_name},\n\nHạn chót tự chấm điểm rèn luyện {semester_display} {year} của bạn là ngày {val}.\nVui lòng đăng nhập hệ thống và nộp phiếu tự chấm trước thời hạn.\n\n* Lưu ý: Nếu quá hạn, bạn sẽ nhận điểm 0 rèn luyện cho học kỳ này."
                             email_html = f"""
 <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); background-color: #ffffff;">
   <div style="background: linear-gradient(135deg, #f59e0b, #d97706); padding: 32px 24px; text-align: center; color: white;">
@@ -86,7 +87,7 @@ class Command(BaseCommand):
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; width: 150px; text-transform: uppercase;">Học kỳ / Năm học:</td>
-          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">HK{semester} - Năm học {year}</td>
+          <td style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: 700;">{semester_display} - Năm học {year}</td>
         </tr>
         <tr>
           <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase;">Hạn cuối nộp:</td>
